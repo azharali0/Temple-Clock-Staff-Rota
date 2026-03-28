@@ -1,0 +1,1319 @@
+// lib/screens/staff/staff_dashboard.dart
+//
+// Phase 3 update: Clock-in / Clock-out wired to real AttendanceService.
+// Replaces the demo "Phase 3 coming soon" bottom sheet with navigation
+// to ClockInScreen.  Everything else (tabs, Phase-2 My-Shifts, Leave,
+// Profile) is preserved exactly as before.
+
+import "dart:async";
+import "package:flutter/material.dart";
+import "package:intl/intl.dart";
+import "package:provider/provider.dart";
+
+import "../../models/user_model.dart";
+import "../../models/rota_model.dart";
+import "../../models/attendance_model.dart";
+import "../../core/constants.dart";
+import "../../core/responsive.dart";
+import "../../services/auth_service.dart";
+import "../../services/rota_service.dart";
+import "../../services/attendance_service.dart";
+import "../../services/alert_service.dart";
+import "../../models/alert_model.dart";
+import "../../widgets/shared_widgets.dart";
+import "../../widgets/app_sidebar.dart";
+import "../login_screen.dart";
+import "shifts_page.dart";
+import "clock_in_screen.dart";
+import "leave_page.dart";
+
+class StaffDashboard extends StatefulWidget {
+  final UserModel user;
+  const StaffDashboard({super.key, required this.user});
+
+  @override
+  State<StaffDashboard> createState() => _StaffDashboardState();
+}
+
+class _StaffDashboardState extends State<StaffDashboard>
+{
+  int _selectedIndex = 0;
+  int _unreadAlertCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUnreadCount();
+  }
+
+  Future<void> _loadUnreadCount() async {
+    try {
+      final alertService = Provider.of<AlertService>(context, listen: false);
+      final count = await alertService.getMyUnreadCount();
+      if (mounted) setState(() => _unreadAlertCount = count);
+    } catch (_) {}
+  }
+
+  void _showNotifications() async {
+    try {
+      final alertService = Provider.of<AlertService>(context, listen: false);
+      final alerts = await alertService.getMyAlerts();
+
+      if (!mounted) return;
+
+      // Mark all unread as read
+      for (final alert in alerts.where((a) => !a.readByStaff)) {
+        try {
+          await alertService.markAlertReadByStaff(alert.id);
+        } catch (_) {}
+      }
+      _loadUnreadCount();
+
+      if (!mounted) return;
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        builder: (_) => _NotificationsSheet(alerts: alerts),
+      );
+    } catch (e) {
+      if (mounted) {
+        showAppSnackBar(context, 'Failed to load notifications', isError: true);
+      }
+    }
+  }
+
+  Future<void> _signOut() async {
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final ok = await showConfirmDialog(
+      context,
+      title: 'Sign Out',
+      message: 'Are you sure you want to sign out?',
+    );
+    if (!mounted) return;
+    if (ok) {
+      await authService.logout();
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+        (_) => false,
+      );
+    }
+  }
+
+  // ── Staff nav items for sidebar ──────────────────────────────────────────
+  static const _navLabels = ['Home', 'My Shifts', 'Leave', 'Profile'];
+  static const _navIcons = [
+    Icons.home_rounded,
+    Icons.calendar_today_rounded,
+    Icons.beach_access_rounded,
+    Icons.person_rounded,
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final showSidebar = Responsive.showSidebar(context);
+
+    final pages = [
+      _StaffHomePage(user: widget.user),
+      StaffShiftsPage(user: widget.user),
+      StaffLeavePage(user: widget.user),
+      _ProfileTab(user: widget.user),
+    ];
+
+    if (showSidebar) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        body: Row(
+          children: [
+            AppSidebar(
+              selectedIndex: _selectedIndex,
+              onItemTap: (i) => setState(() => _selectedIndex = i),
+              userName: widget.user.name,
+              userRole: 'Staff',
+              items: List.generate(
+                _navLabels.length,
+                (i) => SidebarItem(
+                  icon: _navIcons[i],
+                  label: _navLabels[i],
+                  index: i,
+                ),
+              ),
+              onSignOut: _signOut,
+              trailing: IconButton(
+                onPressed: _showNotifications,
+                tooltip: 'Notifications',
+                icon: Badge(
+                  isLabelVisible: _unreadAlertCount > 0,
+                  label: Text(
+                    _unreadAlertCount > 9 ? '9+' : _unreadAlertCount.toString(),
+                    style: const TextStyle(fontSize: 10),
+                  ),
+                  child: const Icon(Icons.notifications_outlined,
+                      size: 22, color: Colors.white70),
+                ),
+              ),
+            ),
+            Expanded(
+              child: IndexedStack(
+                index: _selectedIndex,
+                children: pages,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Mobile: AppBar + bottom nav
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FA),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF0F2C59),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        titleSpacing: 16,
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF00BFA5).withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.health_and_safety_rounded,
+                  size: 16, color: Color(0xFF00BFA5)),
+            ),
+            const SizedBox(width: 8),
+            const Text('CareShift',
+                style: TextStyle(
+                    fontFamily: 'Outfit',
+                    fontWeight: FontWeight.w800,
+                    fontSize: 17)),
+          ],
+        ),
+        actions: [
+          // Notification bell
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: IconButton(
+              onPressed: _showNotifications,
+              icon: Badge(
+                isLabelVisible: _unreadAlertCount > 0,
+                label: Text(
+                  _unreadAlertCount > 9 ? '9+' : _unreadAlertCount.toString(),
+                  style: const TextStyle(fontSize: 10),
+                ),
+                child: const Icon(Icons.notifications_outlined, size: 22),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 14),
+            child: GestureDetector(
+              onTap: _signOut,
+              child: CircleAvatar(
+                radius: 17,
+                backgroundColor: const Color(0xFF00BFA5).withValues(alpha: 0.2),
+                child: Text(
+                  widget.user.name.isNotEmpty
+                      ? widget.user.name[0].toUpperCase()
+                      : '?',
+                  style: const TextStyle(
+                      color: Color(0xFF00BFA5),
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: IndexedStack(
+        index: _selectedIndex,
+        children: pages,
+      ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _selectedIndex,
+        onTap: (i) => setState(() => _selectedIndex = i),
+        type: BottomNavigationBarType.fixed,
+        backgroundColor: Colors.white,
+        selectedItemColor: const Color(0xFF0F2C59),
+        unselectedItemColor: const Color(0xFF78909C),
+        selectedFontSize: 11,
+        unselectedFontSize: 11,
+        elevation: 12,
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.home_outlined),
+            activeIcon: Icon(Icons.home_rounded),
+            label: 'Home',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.calendar_today_outlined),
+            activeIcon: Icon(Icons.calendar_today_rounded),
+            label: 'My Shifts',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.beach_access_outlined),
+            activeIcon: Icon(Icons.beach_access_rounded),
+            label: 'Leave',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person_outline),
+            activeIcon: Icon(Icons.person_rounded),
+            label: 'Profile',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Home Tab ─────────────────────────────────────────────────────────────────
+
+class _StaffHomePage extends StatefulWidget {
+  final UserModel user;
+  const _StaffHomePage({required this.user});
+
+  @override
+  State<_StaffHomePage> createState() => _StaffHomePageState();
+}
+
+class _StaffHomePageState extends State<_StaffHomePage> {
+  static const Color _navy = Color(0xFF1A2B4A);
+  static const Color _teal = Color(0xFF00BFA5);
+
+  DateTime _now = DateTime.now();
+  Timer? _clockTimer;
+
+  RotaShift? _todayShift;
+  AttendanceRecord? _attendanceRecord;
+
+  @override
+  void initState() {
+    super.initState();
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _now = DateTime.now());
+    });
+    _loadTodayShift();
+  }
+
+  @override
+  void dispose() {
+    _clockTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadTodayShift() async {
+    try {
+      final rotaService = Provider.of<RotaService>(context, listen: false);
+      final shifts = await rotaService.getMyShifts();
+      
+      final today = DateTime.now();
+      RotaShift? todayShift;
+      
+      try {
+        todayShift = shifts.firstWhere(
+          (s) =>
+              s.startTime.year == today.year &&
+              s.startTime.month == today.month &&
+              s.startTime.day == today.day,
+        );
+      } catch (_) {
+        todayShift = null;
+      }
+
+      if (mounted) {
+        setState(() {
+          _todayShift = todayShift;
+          if (_todayShift != null) {
+            _refreshAttendance();
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error loading shifts: $e")),
+        );
+      }
+    }
+  }
+
+  Future<void> _refreshAttendance() async {
+    if (_todayShift == null) return;
+    try {
+      final attendanceService = Provider.of<AttendanceService>(context, listen: false);
+      final records = await attendanceService.getMyAttendance();
+      
+       if (mounted) {
+        setState(() {
+          try {
+            _attendanceRecord = records.firstWhere((r) => r.shiftId == _todayShift!.id);
+          } catch (_) {
+            _attendanceRecord = null;
+          }
+        });
+      }
+    } catch (_) {}
+  }
+
+  // ─── Navigate to clock screen ────────────────────────────────────────────────
+
+  Future<void> _openClockScreen(bool isClockIn) async {
+    if (_todayShift == null) return;
+
+    final result = await Navigator.of(context).push<AttendanceRecord>(
+      MaterialPageRoute(
+        builder: (_) => ClockInScreen(
+          shift: _todayShift!,
+          isClockIn: isClockIn,
+          staffId: widget.user.id,
+          staffName: widget.user.name,
+        ),
+      ),
+    );
+
+    if (result != null && mounted) {
+      setState(() => _attendanceRecord = result);
+      showAppSnackBar(
+        context,
+        isClockIn
+            ? "Clocked in successfully!"
+            : "Clocked out successfully!",
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tf = DateFormat("HH:mm:ss");
+    final df = DateFormat("EEEE, d MMMM yyyy");
+
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Greeting
+            _buildGreeting(df),
+            const SizedBox(height: 16),
+            // Live clock
+            _buildClockDisplay(tf),
+            const SizedBox(height: 16),
+            // Clock in/out card
+            _buildClockCard(),
+            const SizedBox(height: 16),
+            // Today summary
+            _buildTodaySummary(),
+            const SizedBox(height: 80),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGreeting(DateFormat df) {
+    final hour = _now.hour;
+    final greeting = hour < 12
+        ? "Good morning"
+        : hour < 17
+            ? "Good afternoon"
+            : "Good evening";
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          greeting + ", " + widget.user.name.split(" ").first + "!",
+          style: const TextStyle(
+            fontFamily: "Outfit",
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF1A2B4A),
+          ),
+        ),
+        Text(
+          df.format(_now),
+          style: const TextStyle(
+            fontFamily: "Outfit",
+            fontSize: 13,
+            color: Colors.grey,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildClockDisplay(DateFormat tf) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      decoration: BoxDecoration(
+        color: _navy,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Text(
+        tf.format(_now),
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          fontFamily: "Outfit",
+          fontSize: 44,
+          fontWeight: FontWeight.w700,
+          color: Colors.white,
+          letterSpacing: 2,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildClockCard() {
+    if (_todayShift == null) {
+      return _card(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.event_busy_outlined, size: 40, color: Colors.grey.shade300),
+            const SizedBox(height: 8),
+            const Text(
+              "No shift scheduled today",
+              style: TextStyle(
+                fontFamily: "Outfit",
+                fontSize: 15,
+                color: Colors.grey,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final shift = _todayShift!;
+    final record = _attendanceRecord;
+    final sf = DateFormat("HH:mm");
+
+    final bool canClockIn = record == null;
+    final bool canClockOut = record != null && record.isClockedIn;
+    final bool alreadyOut = record != null && record.isClockedOut;
+
+    return _card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Title row
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: _teal.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(Icons.work_outline, color: _teal, size: 18),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      "Today's Shift",
+                      style: const TextStyle(
+                        fontFamily: "Outfit",
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: _navy,
+                      ),
+                    ),
+                    Text(
+                      shift.role + "  •  " + sf.format(shift.startTime) + " – " + sf.format(shift.endTime),
+                      style: const TextStyle(
+                        fontFamily: "Outfit",
+                        fontSize: 12,
+                        color: Colors.grey,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          // Status summary
+          if (record != null) _buildAttendanceSummary(record, sf),
+          const SizedBox(height: 14),
+          // Buttons
+          if (alreadyOut)
+            _statusBanner("Shift complete — clocked out", _teal)
+          else
+            Row(
+              children: [
+                if (canClockIn)
+                  Expanded(
+                    child: _ClockButton(
+                      label: "Clock In",
+                      icon: Icons.login,
+                      color: _teal,
+                      onPressed: () => _openClockScreen(true),
+                    ),
+                  ),
+                if (canClockOut) ...[
+                  Expanded(
+                    child: _ClockButton(
+                      label: "Clock Out",
+                      icon: Icons.logout,
+                      color: Colors.redAccent,
+                      onPressed: () => _openClockScreen(false),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAttendanceSummary(AttendanceRecord record, DateFormat sf) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0F4F8),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _summaryRow(
+            Icons.login,
+            "Clocked in",
+            sf.format(record.clockInTime!),
+            record.lateMinutes > 0 ? Colors.orange : _teal,
+          ),
+          if (record.lateMinutes > 0)
+            _summaryRow(
+              Icons.warning_amber_outlined,
+              "Late by",
+              AttendanceService.formatLateMinutes(record.lateMinutes)
+                  .replaceAll(" late", ""),
+              Colors.orange,
+            ),
+          if (record.clockOutTime != null)
+            _summaryRow(
+              Icons.logout,
+              "Clocked out",
+              sf.format(record.clockOutTime!),
+              Colors.grey,
+            ),
+          if (record.extraHours > 0)
+            _summaryRow(
+              Icons.more_time,
+              "Overtime",
+              AttendanceService.formatExtraHours(record.extraHours),
+              Colors.blue,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _summaryRow(IconData icon, String label, String value, Color color) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 6),
+          Text(
+            label + ": ",
+            style: const TextStyle(
+              fontFamily: "Outfit",
+              fontSize: 12,
+              color: Colors.grey,
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontFamily: "Outfit",
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTodaySummary() {
+    final records = AttendanceService.getRecordsForStaff(widget.user.id);
+    final weekStart = _now.subtract(Duration(days: _now.weekday - 1));
+    final weekRecords = records.where((r) {
+      return r.clockInTime != null &&
+          r.clockInTime!.isAfter(weekStart.subtract(const Duration(seconds: 1)));
+    }).toList();
+
+    final double weekHours = weekRecords.fold(
+      0.0,
+      (sum, r) => sum + r.totalHoursWorked,
+    );
+
+    return _card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            "This Week",
+            style: TextStyle(
+              fontFamily: "Outfit",
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: _navy,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _weekStat(
+                  "Shifts",
+                  weekRecords.length.toString(),
+                  Icons.work_outline,
+                  _navy,
+                ),
+              ),
+              Expanded(
+                child: _weekStat(
+                  "Hours",
+                  weekHours.toStringAsFixed(1) + "h",
+                  Icons.schedule,
+                  _teal,
+                ),
+              ),
+              Expanded(
+                child: _weekStat(
+                  "On Time",
+                  weekRecords
+                      .where((r) => r.status == AttendanceStatus.onTime)
+                      .length
+                      .toString(),
+                  Icons.check_circle_outline,
+                  Colors.green,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _weekStat(String label, String value, IconData icon, Color color) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: color, size: 20),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: TextStyle(
+            fontFamily: "Outfit",
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: color,
+          ),
+        ),
+        Text(
+          label,
+          style: const TextStyle(
+            fontFamily: "Outfit",
+            fontSize: 11,
+            color: Colors.grey,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _statusBanner(String msg, Color color) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        msg,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontFamily: "Outfit",
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: color,
+        ),
+      ),
+    );
+  }
+
+  Widget _card({required Widget child}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+}
+
+// ─── Clock Button ─────────────────────────────────────────────────────────────
+
+class _ClockButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onPressed;
+
+  const _ClockButton({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, color: Colors.white, size: 18),
+      label: Text(
+        label,
+        style: const TextStyle(
+          fontFamily: "Outfit",
+          fontWeight: FontWeight.w600,
+          color: Colors.white,
+          fontSize: 14,
+        ),
+      ),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: color,
+        padding: const EdgeInsets.symmetric(vertical: 13),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        elevation: 2,
+      ),
+    );
+  }
+}
+
+// ─── Profile Tab ──────────────────────────────────────────────────────────────
+
+class _ProfileTab extends StatelessWidget {
+  final UserModel user;
+  const _ProfileTab({required this.user});
+
+  static const Color _navy = Color(0xFF1A2B4A);
+  static const Color _teal = Color(0xFF00BFA5);
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            const SizedBox(height: 10),
+
+            // ── Profile header card ─────────────────────────────────────
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF0F2C59), Color(0xFF1A3B6E)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF0F2C59).withValues(alpha: 0.25),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  CircleAvatar(
+                    radius: 40,
+                    backgroundColor: _teal,
+                    child: Text(
+                      user.name.isNotEmpty ? user.name[0].toUpperCase() : "?",
+                      style: const TextStyle(
+                        fontFamily: "Outfit",
+                        fontSize: 32,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    user.name,
+                    style: const TextStyle(
+                      fontFamily: "Outfit",
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: _teal.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      user.role.toUpperCase(),
+                      style: const TextStyle(
+                        fontFamily: "Outfit",
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF00BFA5),
+                        letterSpacing: 1,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    user.email,
+                    style: TextStyle(
+                      fontFamily: "Outfit",
+                      fontSize: 13,
+                      color: Colors.white.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // ── Quick stats row ─────────────────────────────────────────
+            Row(
+              children: [
+                Expanded(
+                  child: _StatMini(
+                    label: 'Hourly Rate',
+                    value: user.hourlyRate != null
+                        ? '\u00A3${user.hourlyRate!.toStringAsFixed(2)}'
+                        : 'N/A',
+                    icon: Icons.payments_outlined,
+                    color: const Color(0xFF7B1FA2),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _StatMini(
+                    label: 'Weekly Hours',
+                    value: user.weeklyHours != null
+                        ? '${user.weeklyHours!.toStringAsFixed(0)}h'
+                        : 'N/A',
+                    icon: Icons.schedule_outlined,
+                    color: const Color(0xFF1565C0),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _StatMini(
+                    label: 'Leave Balance',
+                    value: user.annualLeaveBalance != null
+                        ? '${user.annualLeaveBalance!.toStringAsFixed(0)} days'
+                        : 'N/A',
+                    icon: Icons.beach_access_outlined,
+                    color: const Color(0xFF00838F),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+
+            // ── Personal Information ────────────────────────────────────
+            _sectionCard(
+              title: 'Personal Information',
+              icon: Icons.person_outline,
+              children: [
+                _detailRow(Icons.badge_outlined, 'Employee ID', user.id.substring(user.id.length > 8 ? user.id.length - 8 : 0)),
+                _detailRow(Icons.email_outlined, 'Email', user.email),
+                _detailRow(Icons.phone_outlined, 'Phone', user.phone ?? 'Not set'),
+                _detailRow(Icons.business_outlined, 'Department', user.department ?? 'Not assigned'),
+              ],
+            ),
+            const SizedBox(height: 14),
+
+            // ── Employment Details ──────────────────────────────────────
+            _sectionCard(
+              title: 'Employment Details',
+              icon: Icons.work_outline,
+              children: [
+                _detailRow(Icons.payments_outlined, 'Hourly Rate',
+                    user.hourlyRate != null ? '\u00A3${user.hourlyRate!.toStringAsFixed(2)}/hr' : 'N/A'),
+                _detailRow(Icons.schedule_outlined, 'Weekly Hours',
+                    user.weeklyHours != null ? '${user.weeklyHours!.toStringAsFixed(0)} hours' : 'N/A'),
+                _detailRow(Icons.beach_access_outlined, 'Annual Leave',
+                    user.annualLeaveBalance != null ? '${user.annualLeaveBalance!.toStringAsFixed(1)} days remaining' : 'N/A'),
+                _detailRow(Icons.check_circle_outline, 'Status',
+                    user.isActive ? 'Active' : 'Inactive'),
+              ],
+            ),
+            const SizedBox(height: 80),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sectionCard({
+    required String title,
+    required IconData icon,
+    required List<Widget> children,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: _navy),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontFamily: "Outfit",
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: _navy,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget _detailRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF0F4F8),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, size: 16, color: Colors.grey.shade600),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontFamily: "Outfit",
+                    fontSize: 11,
+                    color: Colors.grey,
+                  ),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontFamily: "Outfit",
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: _navy,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatMini extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color color;
+
+  const _StatMini({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 20, color: color),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: TextStyle(
+              fontFamily: "Outfit",
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: const TextStyle(
+              fontFamily: "Outfit",
+              fontSize: 10,
+              color: Colors.grey,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Notifications Sheet ────────────────────────────────────────────────────
+
+class _NotificationsSheet extends StatelessWidget {
+  final List<AlertModel> alerts;
+  const _NotificationsSheet({required this.alerts});
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.55,
+      minChildSize: 0.3,
+      maxChildSize: 0.85,
+      expand: false,
+      builder: (_, controller) {
+        return Column(
+          children: [
+            // Handle
+            Container(
+              margin: const EdgeInsets.symmetric(vertical: 10),
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  const Icon(Icons.notifications_rounded,
+                      size: 20, color: Color(0xFF0F2C59)),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Notifications',
+                    style: TextStyle(
+                      fontFamily: 'Outfit',
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1A2B4A),
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    '${alerts.length} total',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 20),
+            Expanded(
+              child: alerts.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.notifications_off_outlined,
+                              size: 48, color: Colors.grey.shade300),
+                          const SizedBox(height: 8),
+                          const Text('No notifications yet',
+                              style: TextStyle(color: Colors.grey, fontSize: 14)),
+                        ],
+                      ),
+                    )
+                  : ListView.separated(
+                      controller: controller,
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      itemCount: alerts.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (_, i) {
+                        final alert = alerts[i];
+                        return _NotificationTile(alert: alert);
+                      },
+                    ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _NotificationTile extends StatelessWidget {
+  final AlertModel alert;
+  const _NotificationTile({required this.alert});
+
+  IconData get _icon {
+    switch (alert.alertType) {
+      case 'admin_notice':
+        return Icons.campaign_outlined;
+      case 'emergency':
+        return Icons.warning_amber_rounded;
+      case 'running_late':
+        return Icons.schedule;
+      default:
+        return Icons.info_outline;
+    }
+  }
+
+  Color get _color {
+    switch (alert.alertType) {
+      case 'admin_notice':
+        return const Color(0xFF1565C0);
+      case 'emergency':
+        return Colors.red;
+      case 'running_late':
+        return Colors.orange;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final timeAgo = _formatTimeAgo(alert.createdAt);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: _color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(_icon, size: 18, color: _color),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  alert.message.isNotEmpty ? alert.message : alert.alertType.replaceAll('_', ' '),
+                  style: TextStyle(
+                    fontFamily: 'Outfit',
+                    fontSize: 13,
+                    fontWeight: alert.readByStaff ? FontWeight.w400 : FontWeight.w600,
+                    color: const Color(0xFF1A2B4A),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  timeAgo,
+                  style: const TextStyle(fontSize: 11, color: Colors.grey),
+                ),
+              ],
+            ),
+          ),
+          if (!alert.readByStaff)
+            Container(
+              width: 8,
+              height: 8,
+              margin: const EdgeInsets.only(top: 4),
+              decoration: const BoxDecoration(
+                color: Color(0xFF00BFA5),
+                shape: BoxShape.circle,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  String _formatTimeAgo(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    return '${dt.day}/${dt.month}/${dt.year}';
+  }
+}
+

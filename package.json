@@ -1,0 +1,11 @@
+{
+  "name": "careshift-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "postinstall": "cd backend && npm install",
+    "dev:backend": "cd backend && npm run dev",
+    "seed:backend": "cd backend && npm run seed",
+    "test:api": "cd backend && node test_api.js"
+  }
+}
