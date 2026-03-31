@@ -56,9 +56,18 @@ app.use('/api/reports', require('./routes/reportRoutes'));
 app.use('/api/alerts', require('./routes/alertRoutes'));
 app.use('/api/qr', require('./routes/qrRoutes'));
 
-// Health check endpoint
+// Health check endpoint (includes DB status)
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'CareShift API is running' });
+  const mongoose = require('mongoose');
+  const dbState = mongoose.connection.readyState;
+  // 0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
+  const dbStatus = dbState === 1 ? 'connected' : dbState === 2 ? 'connecting' : 'disconnected';
+  const httpStatus = dbState === 1 ? 200 : 503;
+  res.status(httpStatus).json({
+    status: dbState === 1 ? 'ok' : 'degraded',
+    message: 'CareShift API is running',
+    database: dbStatus,
+  });
 });
 
 // --------------- Error Handler ---------------

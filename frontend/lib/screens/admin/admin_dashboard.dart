@@ -11,8 +11,10 @@
 //   4 = Leave
 //   5 = Payroll
 //   6 = Reports
-//   7 = Settings
-//   8 = Sign Out
+//   7 = Alerts
+//   8 = QR Management
+//   9 = Settings
+//   10 = Sign Out
 
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -34,6 +36,7 @@ import 'payroll_page.dart';
 import 'reports_page.dart';
 import 'settings_page.dart';
 import 'alerts_page.dart';
+import 'qr_management_page.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ADMIN DASHBOARD
@@ -59,6 +62,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     _NavItem(icon: FontAwesomeIcons.moneyBillWave, label: 'Payroll'),
     _NavItem(icon: FontAwesomeIcons.chartBar, label: 'Reports'),
     _NavItem(icon: FontAwesomeIcons.bell, label: 'Alerts'),
+    _NavItem(icon: FontAwesomeIcons.qrcode, label: 'QR Code'),
     _NavItem(icon: FontAwesomeIcons.gear, label: 'Settings'),
   ];
 
@@ -85,6 +89,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       case 7:
         return const AlertsPage();
       case 8:
+        return const QrManagementPage();
+      case 9:
         return const SettingsPage();
       default:
         return const SizedBox.shrink();
@@ -92,7 +98,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   void _onNavTap(int index) {
-    if (index == 9) {
+    if (index == 10) {
       _confirmSignOut();
       return;
     }
@@ -118,6 +124,96 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
+  // ── Primary bottom-nav indices (shown as tabs) ─────────────────────────────
+  static const _primaryMobileIndices = [0, 1, 2, 8]; // Dashboard, Rota, Timesheets, QR Code
+  // Everything else is accessible via "More" bottom sheet
+  static const _moreMenuIndices = [3, 4, 5, 6, 7, 9]; // Staff, Leave, Payroll, Reports, Alerts, Settings
+
+  bool get _isMorePage => _moreMenuIndices.contains(_selectedIndex);
+
+  // ── "More" bottom sheet ────────────────────────────────────────────────────
+  void _showMoreMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text('More',
+                  style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: GridView.count(
+                  crossAxisCount: 3,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  mainAxisSpacing: 4,
+                  crossAxisSpacing: 4,
+                  childAspectRatio: 1.1,
+                  children: _moreMenuIndices.map((i) {
+                    final item = _navItems[i];
+                    final selected = _selectedIndex == i;
+                    return _MoreMenuItem(
+                      icon: item.icon,
+                      label: item.label,
+                      selected: selected,
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _onNavTap(i);
+                      },
+                    );
+                  }).toList(),
+                ),
+              ),
+              const Divider(height: 24),
+              // Sign out row
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: ListTile(
+                  leading: const Icon(Icons.logout_rounded,
+                      size: 20, color: Color(0xFFD32F2F)),
+                  title: const Text('Sign Out',
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFFD32F2F))),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _confirmSignOut();
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
@@ -133,6 +229,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 onItemTap: _onNavTap,
                 userName: widget.user.name,
                 userRole: 'Administrator',
+                primaryCount: 5, // Dashboard, Rota, Timesheets, Staff, Leave always visible
                 items: _navItems
                   .asMap()
                   .entries
@@ -150,7 +247,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       );
     }
 
-    // Mobile: bottom nav
+    // Mobile / Tablet: bottom nav + "More" sheet
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -175,13 +272,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ],
         ),
         actions: [
-          // Export / Reports shortcut
-          IconButton(
-            onPressed: () => _onNavTap(6),
-            tooltip: 'Export Reports',
-            icon: const Icon(Icons.download_rounded, size: 20),
-          ),
-          // Alerts shortcut
           IconButton(
             onPressed: () => _onNavTap(7),
             tooltip: 'Alerts',
@@ -214,21 +304,42 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Widget _buildBottomNav() {
-    // Mobile bottom nav: Dashboard, Rota, Timesheets, Leave, Alerts
-    const mobileItems = [0, 1, 2, 4, 7];
-    return BottomNavigationBar(
-      currentIndex: mobileItems.contains(_selectedIndex)
-          ? mobileItems.indexOf(_selectedIndex)
-          : 0,
-      onTap: (i) => _onNavTap(mobileItems[i]),
-      items: mobileItems.map((i) {
+    // Compute which tab is active
+    final int activeTabIndex;
+    if (_primaryMobileIndices.contains(_selectedIndex)) {
+      activeTabIndex = _primaryMobileIndices.indexOf(_selectedIndex);
+    } else if (_isMorePage) {
+      activeTabIndex = _primaryMobileIndices.length; // "More" tab
+    } else {
+      activeTabIndex = 0;
+    }
+
+    final items = <BottomNavigationBarItem>[
+      ..._primaryMobileIndices.map((i) {
         final item = _navItems[i];
         return BottomNavigationBarItem(
           icon: FaIcon(item.icon, size: 17),
           activeIcon: FaIcon(item.icon, size: 17),
           label: item.label,
         );
-      }).toList(),
+      }),
+      BottomNavigationBarItem(
+        icon: Icon(_isMorePage ? Icons.grid_view_rounded : Icons.more_horiz_rounded, size: 20),
+        activeIcon: const Icon(Icons.grid_view_rounded, size: 20),
+        label: 'More',
+      ),
+    ];
+
+    return BottomNavigationBar(
+      currentIndex: activeTabIndex,
+      onTap: (i) {
+        if (i == _primaryMobileIndices.length) {
+          _showMoreMenu();
+        } else {
+          _onNavTap(_primaryMobileIndices[i]);
+        }
+      },
+      items: items,
       type: BottomNavigationBarType.fixed,
       selectedItemColor: AppColors.teal,
       unselectedItemColor: AppColors.textMuted,
@@ -254,6 +365,7 @@ class _AdminOverviewPage extends StatefulWidget {
 
 class _AdminOverviewPageState extends State<_AdminOverviewPage> {
   bool _loading = true;
+  String? _error;
   Map<String, dynamic> _stats = {};
   Map<String, dynamic> _todayAttendance = {};
 
@@ -264,7 +376,7 @@ class _AdminOverviewPageState extends State<_AdminOverviewPage> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    setState(() { _loading = true; _error = null; });
     try {
       final rotaService = Provider.of<RotaService>(context, listen: false);
       final attendanceService = Provider.of<AttendanceService>(context, listen: false);
@@ -281,7 +393,10 @@ class _AdminOverviewPageState extends State<_AdminOverviewPage> {
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _loading = false);
+        setState(() {
+          _loading = false;
+          _error = e.toString();
+        });
       }
     }
   }
@@ -298,6 +413,47 @@ class _AdminOverviewPageState extends State<_AdminOverviewPage> {
           child: ListView(
             padding: EdgeInsets.all(pad),
             children: [
+              // ── Connection error banner ────────────────────────────────
+              if (_error != null)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppColors.error.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.error.withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.cloud_off_rounded, size: 22, color: AppColors.error),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Connection Error',
+                                style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.error)),
+                            const SizedBox(height: 2),
+                            Text(
+                              _error!.contains('connect')
+                                  ? 'Cannot reach the server. Pull down to retry.'
+                                  : 'Something went wrong. Pull down to retry.',
+                              style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: _load,
+                        icon: const Icon(Icons.refresh_rounded, size: 20, color: AppColors.error),
+                        tooltip: 'Retry',
+                      ),
+                    ],
+                  ),
+                ),
               // Header
               Row(
                 children: [
@@ -375,12 +531,16 @@ class _AdminOverviewPageState extends State<_AdminOverviewPage> {
     final completed = _todayAttendance['completedShifts'] ?? 0;
     final extra =
         (_todayAttendance['extraHoursTotal'] as double? ?? 0.0);
+    final screenW = MediaQuery.of(context).size.width;
+    final aspectRatio = Responsive.isDesktop(context)
+        ? 1.5
+        : (screenW < 380 ? 0.95 : 1.1);
 
     return GridView.count(
       crossAxisCount: cols,
       crossAxisSpacing: 12,
       mainAxisSpacing: 12,
-      childAspectRatio: Responsive.isDesktop(context) ? 1.5 : 1.1,
+      childAspectRatio: aspectRatio,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       children: [
@@ -579,6 +739,67 @@ class _QuickAction extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MoreMenuItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _MoreMenuItem({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          decoration: BoxDecoration(
+            color: selected
+                ? AppColors.teal.withValues(alpha: 0.08)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(14),
+            border: selected
+                ? Border.all(color: AppColors.teal.withValues(alpha: 0.25))
+                : null,
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? AppColors.teal.withValues(alpha: 0.12)
+                      : AppColors.background,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: FaIcon(icon,
+                    size: 18,
+                    color: selected ? AppColors.teal : AppColors.textMuted),
+              ),
+              const SizedBox(height: 6),
+              Text(label,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    color: selected ? AppColors.teal : AppColors.textSecondary,
+                  ),
+                  overflow: TextOverflow.ellipsis),
+            ],
+          ),
         ),
       ),
     );

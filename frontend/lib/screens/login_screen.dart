@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../core/constants.dart';
 import '../models/user_model.dart';
 import '../services/auth_service.dart';
+import '../services/api_service.dart';
 import 'staff/staff_dashboard.dart';
 import 'admin/admin_dashboard.dart';
 
@@ -31,29 +32,48 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
 
-    final authService = Provider.of<AuthService>(context, listen: false);
-    final result = await authService.login(
-      _emailController.text.trim(),
-      _passwordController.text.trim(),
-    );
-
-    if (!mounted) return;
-    setState(() => _isLoading = false);
-
-    if (result['success'] == true) {
-      final user = result['user'] as Map<String, dynamic>;
-      final userModel = UserModel.fromJson(user);
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => user['role'] == 'admin'
-              ? AdminDashboard(user: userModel)
-              : StaffDashboard(user: userModel),
-        ),
+    try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      final result = await authService.login(
+        _emailController.text.trim(),
+        _passwordController.text.trim(),
       );
-    } else {
+
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+
+      if (result['success'] == true) {
+        final user = result['user'] as Map<String, dynamic>;
+        final userModel = UserModel.fromJson(user);
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => user['role'] == 'admin'
+                ? AdminDashboard(user: userModel)
+                : StaffDashboard(user: userModel),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(result['message'] ?? 'Login failed'),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } on ApiConnectionException {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Cannot connect to server. Please check your connection and try again.'),
+        backgroundColor: AppColors.error,
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 5),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(result['message'] ?? 'Login failed'),
+        content: Text('Error: ${e.toString()}'),
         backgroundColor: AppColors.error,
         behavior: SnackBarBehavior.floating,
       ));

@@ -1,70 +1,117 @@
-const QRCode = require('qrcode');
+const DailyQR = require('../models/DailyQR');
 
-// @desc    Generate QR code for shift clock-in
-// @route   GET /api/qr/shift/:shiftId
-// @access  Private (admin or assigned staff)
-const generateShiftQR = async (req, res) => {
+// @desc    Generate a new daily QR code (expires all previous ones)
+// @route   POST /api/qr/generate
+// @access  Private/Admin
+const generateDailyQR = async (req, res) => {
   try {
-    const { shiftId } = req.params;
-    const baseUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
+    const { label } = req.body;
 
-    // QR payload — contains the shift ID and clock-in URL
-    const qrData = JSON.stringify({
-      type: 'careshift-clock-in',
-      shiftId,
-      url: `${baseUrl}/clock-in/${shiftId}`,
-      generatedAt: new Date().toISOString(),
+    // Expire all existing active QR codes
+    await DailyQR.updateMany({ isActive: true }, { isActive: false });
+
+    // Create a new active QR
+    const qr = await DailyQR.create({
+      generatedBy: req.user._id,
+      label: label || `QR – ${new Date().toLocaleDateString('en-GB')}`,
     });
 
-    // Generate PNG buffer
-    const buffer = await QRCode.toBuffer(qrData, {
-      type: 'png',
-      width: 300,
-      margin: 2,
-      color: {
-        dark: '#1B2A4A',  // Navy
-        light: '#FFFFFF',
-      },
-      errorCorrectionLevel: 'M',
-    });
+    await qr.populate('generatedBy', 'name email');
 
-    res.setHeader('Content-Type', 'image/png');
-    res.setHeader(
-      'Content-Disposition',
-      `inline; filename="shift-${shiftId}-qr.png"`
-    );
-    res.send(buffer);
+    res.status(201).json(qr);
   } catch (error) {
-    console.error('GenerateQR error:', error.message);
+    console.error('generateDailyQR error:', error.message);
     res.status(500).json({ message: 'Failed to generate QR code' });
   }
 };
 
-// @desc    Generate QR code as base64 data URL
-// @route   GET /api/qr/shift/:shiftId/base64
+// @desc    Get the current active QR code
+// @route   GET /api/qr/active
+// @access  Private (admin sees full detail, staff just verifies)
+const getActiveQR = async (req, res) => {
+  try {
+    const qr = await DailyQR.findOne({ isActive: true })
+      .sort({ createdAt: -1 })
+      .populate('generatedBy', 'name email');
+
+    if (!qr) {
+      return res.status(404).json({ message: 'No active QR code found' });
+    }
+
+    res.json(qr);
+  } catch (error) {
+    console.error('getActiveQR error:', error.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// @desc    Verify a QR token scanned by staff
+// @route   POST /api/qr/verify
 // @access  Private
-const generateShiftQRBase64 = async (req, res) => {
+const verifyQR = async (req, res) => {
   try {
-    const { shiftId } = req.params;
-    const baseUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
+    const { token } = req.body;
 
-    const qrData = JSON.stringify({
-      type: 'careshift-clock-in',
-      shiftId,
-      url: `${baseUrl}/clock-in/${shiftId}`,
-    });
+    if (!token) {
+      return res.status(400).json({ message: 'QR token is required' });
+    }
 
-    const dataUrl = await QRCode.toDataURL(qrData, {
-      width: 300,
-      margin: 2,
-      color: { dark: '#1B2A4A', light: '#FFFFFF' },
-    });
+    const qr = await DailyQR.findOne({ token, isActive: true });
 
-    res.json({ shiftId, qrCode: dataUrl });
+    if (!qr) {
+      return res
+        .status(403)
+        .json({ message: 'Invalid or expired QR code. Please ask your admin for the latest QR.' });
+    }
+
+    res.json({ valid: true, qrId: qr._id });
   } catch (error) {
-    console.error('GenerateQRBase64 error:', error.message);
-    res.status(500).json({ message: 'Failed to generate QR code' });
+    console.error('verifyQR error:', error.message);
+    res.status(500).json({ message: 'Server error' });
   }
 };
 
-module.exports = { generateShiftQR, generateShiftQRBase64 };
+// @desc    Get QR history (admin only)
+// @route   GET /api/qr/history
+// @access  Private/Admin
+const getQRHistory = async (req, res) => {
+  try {
+    const history = await DailyQR.find()
+      .sort({ createdAt: -1 })
+      .limit(30)
+      .populate('generatedBy', 'name email');
+
+    res.json(history);
+  } catch (error) {
+    console.error('getQRHistory error:', error.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// @desc    Expire (deactivate) a specific QR code
+// @route   PUT /api/qr/:id/expire
+// @access  Private/Admin
+const expireQR = async (req, res) => {
+  try {
+    const qr = await DailyQR.findById(req.params.id);
+    if (!qr) {
+      return res.status(404).json({ message: 'QR code not found' });
+    }
+
+    qr.isActive = false;
+    await qr.save();
+
+    res.json({ message: 'QR code expired', qr });
+  } catch (error) {
+    console.error('expireQR error:', error.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+module.exports = {
+  generateDailyQR,
+  getActiveQR,
+  verifyQR,
+  getQRHistory,
+  expireQR,
+};

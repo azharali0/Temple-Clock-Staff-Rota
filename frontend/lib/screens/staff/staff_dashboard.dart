@@ -19,6 +19,7 @@ import "../../services/auth_service.dart";
 import "../../services/rota_service.dart";
 import "../../services/attendance_service.dart";
 import "../../services/alert_service.dart";
+import "../../services/qr_service.dart";
 import "../../models/alert_model.dart";
 import "../../widgets/shared_widgets.dart";
 import "../../widgets/app_sidebar.dart";
@@ -26,6 +27,7 @@ import "../login_screen.dart";
 import "shifts_page.dart";
 import "clock_in_screen.dart";
 import "leave_page.dart";
+import "qr_scanner_screen.dart";
 
 class StaffDashboard extends StatefulWidget {
   final UserModel user;
@@ -382,8 +384,50 @@ class _StaffHomePageState extends State<_StaffHomePage> {
 
   // ─── Navigate to clock screen ────────────────────────────────────────────────
 
-  Future<void> _openClockScreen(bool isClockIn) async {
-    if (_todayShift == null) return;
+  /// Opens the camera QR scanner screen (or manual-entry fallback).
+  /// Verifies the token with the backend, then navigates to ClockInScreen.
+  Future<void> _scanAndVerifyQR(bool isClockIn) async {
+    if (!isClockIn && _todayShift == null) return;
+    if (isClockIn && _todayShift == null) {
+      showAppSnackBar(context, 'No shift scheduled today', isError: true);
+      return;
+    }
+
+    // Open camera QR scanner
+    final enteredToken = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => QrScannerScreen(isClockIn: isClockIn),
+      ),
+    );
+
+    if (enteredToken == null || enteredToken.isEmpty || !mounted) return;
+
+    // Extract the token from the JSON payload if user scanned a QR image
+    String resolvedToken = enteredToken;
+    if (enteredToken.contains('token')) {
+      try {
+        final match = RegExp(r'"token"\s*:\s*"([^"]+)"').firstMatch(enteredToken);
+        if (match != null) resolvedToken = match.group(1)!;
+      } catch (_) {}
+    }
+
+    // Verify the token with the backend
+    try {
+      final qrService = Provider.of<QrService>(context, listen: false);
+      await qrService.verifyQR(resolvedToken);
+    } catch (e) {
+      if (mounted) {
+        showAppSnackBar(
+          context,
+          e.toString().replaceAll('Exception: ', ''),
+          isError: true,
+        );
+      }
+      return;
+    }
+
+    // Token is valid — proceed to ClockInScreen
+    if (!mounted) return;
 
     final result = await Navigator.of(context).push<AttendanceRecord>(
       MaterialPageRoute(
@@ -392,6 +436,7 @@ class _StaffHomePageState extends State<_StaffHomePage> {
           isClockIn: isClockIn,
           staffId: widget.user.id,
           staffName: widget.user.name,
+          qrToken: resolvedToken,
         ),
       ),
     );
@@ -400,11 +445,14 @@ class _StaffHomePageState extends State<_StaffHomePage> {
       setState(() => _attendanceRecord = result);
       showAppSnackBar(
         context,
-        isClockIn
-            ? "Clocked in successfully!"
-            : "Clocked out successfully!",
+        isClockIn ? 'Clocked in successfully!' : 'Clocked out successfully!',
       );
     }
+  }
+
+  Future<void> _openClockScreen(bool isClockIn) async {
+    // All clock-in / clock-out goes through QR verification
+    await _scanAndVerifyQR(isClockIn);
   }
 
   @override
@@ -518,20 +566,10 @@ class _StaffHomePageState extends State<_StaffHomePage> {
             childAspectRatio: 2.2,
             children: [
               _quickActionTile(
-                icon: Icons.login,
+                icon: Icons.login_rounded,
                 label: "Clock In",
                 color: _teal,
-                onTap: () {
-                  if (_todayShift != null &&
-                      (_attendanceRecord == null)) {
-                    _openClockScreen(true);
-                  } else {
-                    showAppSnackBar(context,
-                        _todayShift == null
-                            ? "No shift today"
-                            : "Already clocked in");
-                  }
-                },
+                onTap: () => _openClockScreen(true),
               ),
               _quickActionTile(
                 icon: Icons.calendar_today_rounded,

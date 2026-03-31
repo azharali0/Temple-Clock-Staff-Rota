@@ -46,6 +46,10 @@ dependencies:
 
   # ── Phase 7 — Reports download ──────────────────────────────────────────
   url_launcher: ^6.2.5
+  qr_flutter: ^4.1.0
+
+  # ── QR Camera Scanning ─────────────────────────────────────────────────
+  mobile_scanner: ^6.0.2
 
 dev_dependencies:
   flutter_test:
