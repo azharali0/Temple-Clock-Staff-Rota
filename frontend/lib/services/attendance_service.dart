@@ -16,12 +16,16 @@ class AttendanceService {
     double? latitude,
     double? longitude,
     String? photoPath,
+    String? qrToken,
   }) async {
     final body = <String, dynamic>{
       'shiftId': shiftId,
     };
     if (latitude != null && longitude != null) {
       body['location'] = {'lat': latitude, 'lng': longitude};
+    }
+    if (qrToken != null) {
+      body['qrToken'] = qrToken;
     }
 
     final response = await _apiService.post('/attendance/clock-in', body);
@@ -44,12 +48,16 @@ class AttendanceService {
     double? latitude,
     double? longitude,
     String? photoPath,
+    String? qrToken,
   }) async {
     final body = <String, dynamic>{
       'shiftId': shiftId,
     };
     if (latitude != null && longitude != null) {
       body['location'] = {'lat': latitude, 'lng': longitude};
+    }
+    if (qrToken != null) {
+      body['qrToken'] = qrToken;
     }
 
     final response = await _apiService.post('/attendance/clock-out', body);

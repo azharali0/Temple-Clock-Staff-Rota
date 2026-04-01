@@ -10,6 +10,7 @@ import 'services/user_service.dart';
 import 'services/payroll_service.dart';
 import 'services/settings_service.dart';
 import 'services/alert_service.dart';
+import 'services/qr_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/staff/staff_dashboard.dart';
 import 'screens/admin/admin_dashboard.dart';
@@ -46,6 +47,9 @@ void main() {
         ),
         ProxyProvider<ApiService, AlertService>(
           update: (_, api, __) => AlertService(api),
+        ),
+        ProxyProvider<ApiService, QrService>(
+          update: (_, api, __) => QrService(api),
         ),
       ],
       child: const CareShiftApp(),

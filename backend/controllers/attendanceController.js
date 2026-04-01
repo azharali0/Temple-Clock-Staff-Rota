@@ -2,6 +2,7 @@ const { validationResult } = require('express-validator');
 const Attendance = require('../models/Attendance');
 const Shift = require('../models/Shift');
 const Settings = require('../models/Settings');
+const DailyQR = require('../models/DailyQR');
 
 // Load configurable settings from DB (cached for performance)
 let _cachedSettings = null;
@@ -63,8 +64,19 @@ const clockIn = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { shiftId, location, imageUrl } = req.body;
+    const { shiftId, location, imageUrl, qrToken } = req.body;
     const staffId = req.user._id;
+
+    // 0. Verify QR token (staff must scan the daily QR)
+    if (req.user.role !== 'admin') {
+      if (!qrToken) {
+        return res.status(400).json({ message: 'QR code scan is required to clock in' });
+      }
+      const validQR = await DailyQR.findOne({ token: qrToken, isActive: true });
+      if (!validQR) {
+        return res.status(403).json({ message: 'Invalid or expired QR code. Please ask your admin for the latest QR.' });
+      }
+    }
 
     // 1. Shift must exist
     const shift = await Shift.findById(shiftId);
@@ -176,8 +188,19 @@ const clockOut = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { shiftId, imageUrl } = req.body;
+    const { shiftId, imageUrl, qrToken } = req.body;
     const staffId = req.user._id;
+
+    // 0. Verify QR token (staff must scan the daily QR to clock out)
+    if (req.user.role !== 'admin') {
+      if (!qrToken) {
+        return res.status(400).json({ message: 'QR code scan is required to clock out' });
+      }
+      const validQR = await DailyQR.findOne({ token: qrToken, isActive: true });
+      if (!validQR) {
+        return res.status(403).json({ message: 'Invalid or expired QR code. Please ask your admin for the latest QR.' });
+      }
+    }
 
     // 1. Find the attendance record
     const attendance = await Attendance.findOne({ staffId, shiftId });

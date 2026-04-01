@@ -1,18 +1,32 @@
 const express = require('express');
 const {
-    generateShiftQR,
-    generateShiftQRBase64,
+    generateDailyQR,
+    getActiveQR,
+    verifyQR,
+    getQRHistory,
+    expireQR,
 } = require('../controllers/qrController');
-const { protect } = require('../middleware/auth');
+const { protect, authorize, validateObjectId } = require('../middleware/auth');
 
 const router = express.Router();
 
 router.use(protect);
 
-// GET /api/qr/shift/:shiftId — PNG image
-router.get('/shift/:shiftId', generateShiftQR);
+const adminOnly = authorize('admin');
 
-// GET /api/qr/shift/:shiftId/base64 — JSON with data URL
-router.get('/shift/:shiftId/base64', generateShiftQRBase64);
+// POST /api/qr/generate — Admin generates new daily QR (expires old ones)
+router.post('/generate', adminOnly, generateDailyQR);
+
+// GET /api/qr/active — Get current active QR code
+router.get('/active', getActiveQR);
+
+// POST /api/qr/verify — Staff verifies scanned QR token
+router.post('/verify', verifyQR);
+
+// GET /api/qr/history — Admin views QR history
+router.get('/history', adminOnly, getQRHistory);
+
+// PUT /api/qr/:id/expire — Admin manually expires a QR
+router.put('/:id/expire', validateObjectId, adminOnly, expireQR);
 
 module.exports = router;

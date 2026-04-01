@@ -29,8 +29,21 @@ app.use(compression());
 // Global rate limiter — 100 req/min per IP
 app.use('/api/', apiLimiter);
 
-// Allow requests from Flutter app (any origin in dev)
-app.use(cors());
+// Allow requests from Flutter app (restrict origins in production)
+const allowedOrigins = [
+  process.env.FRONTEND_URL || 'http://localhost:8080',
+  'http://localhost:3000',
+  'http://localhost:5000',
+];
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, curl, server-to-server)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+}));
 
 // Parse JSON request bodies (10mb limit for base64 image uploads)
 app.use(express.json({ limit: '10mb' }));
@@ -56,9 +69,18 @@ app.use('/api/reports', require('./routes/reportRoutes'));
 app.use('/api/alerts', require('./routes/alertRoutes'));
 app.use('/api/qr', require('./routes/qrRoutes'));
 
-// Health check endpoint
+// Health check endpoint (includes DB status)
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'CareShift API is running' });
+  const mongoose = require('mongoose');
+  const dbState = mongoose.connection.readyState;
+  // 0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
+  const dbStatus = dbState === 1 ? 'connected' : dbState === 2 ? 'connecting' : 'disconnected';
+  const httpStatus = dbState === 1 ? 200 : 503;
+  res.status(httpStatus).json({
+    status: dbState === 1 ? 'ok' : 'degraded',
+    message: 'CareShift API is running',
+    database: dbStatus,
+  });
 });
 
 // --------------- Error Handler ---------------

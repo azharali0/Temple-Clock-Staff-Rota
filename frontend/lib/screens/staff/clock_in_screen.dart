@@ -22,6 +22,7 @@ class ClockInScreen extends StatefulWidget {
   final bool isClockIn;
   final String staffId;
   final String staffName;
+  final String? qrToken;
 
   const ClockInScreen({
     super.key,
@@ -29,6 +30,7 @@ class ClockInScreen extends StatefulWidget {
     required this.isClockIn,
     required this.staffId,
     required this.staffName,
+    this.qrToken,
   });
 
   @override
@@ -244,6 +246,7 @@ class _ClockInScreenState extends State<ClockInScreen> {
           latitude: lat,
           longitude: lng,
           photoPath: _capturedPhoto?.path,
+          qrToken: widget.qrToken,
         );
       } else {
         record = await attendanceService.clockOut(
@@ -251,6 +254,7 @@ class _ClockInScreenState extends State<ClockInScreen> {
           latitude: lat,
           longitude: lng,
           photoPath: _capturedPhoto?.path,
+          qrToken: widget.qrToken,
         );
       }
       if (mounted) Navigator.of(context).pop(record);
