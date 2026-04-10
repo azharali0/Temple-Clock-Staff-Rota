@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import '../../core/constants.dart';
 import '../../core/responsive.dart';
 import '../../services/qr_service.dart';
@@ -161,6 +164,57 @@ class _QrManagementPageState extends State<QrManagementPage> {
         showAppSnackBar(context, 'Error: $e', isError: true);
       }
     }
+  }
+
+  Future<void> _printQR(DailyQR qr) async {
+    final doc = pw.Document();
+    final df = DateFormat('EEEE, d MMM yyyy');
+    final qrPayload = '{"type":"careshift-daily","token":"${qr.token}"}';
+
+    doc.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        build: (pw.Context context) {
+          return pw.Center(
+            child: pw.Column(
+              mainAxisAlignment: pw.MainAxisAlignment.center,
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
+              children: [
+                pw.Text('Temple Clock', style: pw.TextStyle(fontSize: 40, fontWeight: pw.FontWeight.bold, color: PdfColor.fromHex('#0F2C59'))),
+                pw.SizedBox(height: 10),
+                pw.Text('Staff Clock-In / Clock-Out', style: pw.TextStyle(fontSize: 24, color: PdfColors.grey700)),
+                pw.SizedBox(height: 40),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(20),
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(color: PdfColors.grey300, width: 2),
+                    borderRadius: const pw.BorderRadius.all(pw.Radius.circular(16)),
+                  ),
+                  child: pw.BarcodeWidget(
+                    color: PdfColor.fromHex('#0F2C59'),
+                    barcode: pw.Barcode.qrCode(),
+                    data: qrPayload,
+                    width: 300,
+                    height: 300,
+                  ),
+                ),
+                pw.SizedBox(height: 30),
+                pw.Text(qr.label, style: pw.TextStyle(fontSize: 28, fontWeight: pw.FontWeight.bold)),
+                pw.SizedBox(height: 10),
+                pw.Text('Generated on ${df.format(qr.createdAt.toLocal())}', style: const pw.TextStyle(fontSize: 14, color: PdfColors.grey600)),
+                pw.SizedBox(height: 40),
+                pw.Text('Please use the Temple Clock Staff App to scan this code.', style: const pw.TextStyle(fontSize: 16)),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+
+    await Printing.layoutPdf(
+      onLayout: (PdfPageFormat format) async => doc.save(),
+      name: 'Temple-Clock-QR-${qr.label}',
+    );
   }
 
   @override
@@ -427,6 +481,16 @@ class _QrManagementPageState extends State<QrManagementPage> {
           spacing: 10,
           runSpacing: 10,
           children: [
+            FilledButton.icon(
+              onPressed: () => _printQR(qr),
+              icon: const Icon(Icons.print, size: 16),
+              label: const Text('Print / PDF'),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
             OutlinedButton.icon(
               onPressed: _generateNewQR,
               icon: const Icon(Icons.refresh, size: 16),
