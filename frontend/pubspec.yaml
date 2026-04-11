@@ -35,10 +35,8 @@ dependencies:
 
   # ── QR Camera Scanning ─────────────────────────────────────────────────
   mobile_scanner: ^6.0.2
-
-  # ── PDF and Printing (Phase 7 expansion) ───────────────────────────────
-  pdf: ^3.10.8
-  printing: ^5.11.1
+  pdf: ^3.12.0
+  printing: ^5.14.3
 
 dev_dependencies:
   flutter_test:
