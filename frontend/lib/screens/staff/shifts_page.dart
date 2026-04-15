@@ -273,6 +273,46 @@ class _StaffShiftsPageState extends State<StaffShiftsPage> {
                       ),
                     ],
                   ),
+                  if (shift.visits != null && shift.visits!.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    const Divider(height: 1),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text("Client Visits (Itinerary):", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.navy)),
+                          const SizedBox(height: 6),
+                          ...shift.visits!.map((v) {
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 6),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Icon(Icons.home, size: 14, color: AppColors.teal),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text("${v.clientName} (${tf.format(v.expectedStartTime)} - ${tf.format(v.expectedEndTime)})", style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.navy)),
+                                        Text(v.clientAddress, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                      ],
+                                    ),
+                                  )
+                                ],
+                              ),
+                            );
+                          }),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

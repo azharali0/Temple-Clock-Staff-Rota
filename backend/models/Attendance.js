@@ -12,6 +12,11 @@ const attendanceSchema = new mongoose.Schema(
       ref: 'Shift',
       required: [true, 'Shift is required'],
     },
+    clientId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Client',
+      // Optional: only present for Domiciliary visits
+    },
     clockInTime: {
       type: Date,
     },
@@ -57,8 +62,8 @@ const attendanceSchema = new mongoose.Schema(
   }
 );
 
-// Prevent duplicate clock-in: one attendance record per staff per shift
-attendanceSchema.index({ staffId: 1, shiftId: 1 }, { unique: true });
+// Prevent exact duplicate visit check-ins for the same client on the same shift
+attendanceSchema.index({ staffId: 1, shiftId: 1, clientId: 1 }, { unique: true });
 // Index for date-range queries (timesheets, payroll generation)
 attendanceSchema.index({ staffId: 1, clockInTime: 1 });
 

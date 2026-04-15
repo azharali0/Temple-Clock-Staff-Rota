@@ -13,6 +13,7 @@ class AttendanceService {
 
   Future<AttendanceRecord> clockIn({
     required String shiftId,
+    String? clientId,
     double? latitude,
     double? longitude,
     String? photoPath,
@@ -21,6 +22,9 @@ class AttendanceService {
     final body = <String, dynamic>{
       'shiftId': shiftId,
     };
+    if (clientId != null && clientId.isNotEmpty) {
+      body['clientId'] = clientId;
+    }
     if (latitude != null && longitude != null) {
       body['location'] = {'lat': latitude, 'lng': longitude};
     }
@@ -45,6 +49,7 @@ class AttendanceService {
 
   Future<AttendanceRecord> clockOut({
     required String shiftId,
+    String? clientId,
     double? latitude,
     double? longitude,
     String? photoPath,
@@ -53,6 +58,9 @@ class AttendanceService {
     final body = <String, dynamic>{
       'shiftId': shiftId,
     };
+    if (clientId != null && clientId.isNotEmpty) {
+      body['clientId'] = clientId;
+    }
     if (latitude != null && longitude != null) {
       body['location'] = {'lat': latitude, 'lng': longitude};
     }
@@ -170,6 +178,7 @@ class AttendanceService {
       staffId: staffId,
       staffName: staffName,
       shiftId: shiftId,
+      clientId: json['clientId']?.toString(),
       scheduledStart: scheduledStart,
       scheduledEnd: scheduledEnd,
       clockInTime: json['clockInTime'] != null ? DateTime.parse(json['clockInTime']) : null,

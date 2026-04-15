@@ -29,6 +29,16 @@ const shiftSchema = new mongoose.Schema(
       lat: { type: Number },
       lng: { type: Number },
     },
+    visits: [
+      {
+        client: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'Client',
+        },
+        expectedStartTime: String,
+        expectedEndTime: String,
+      }
+    ],
     notes: {
       type: String,
       trim: true,

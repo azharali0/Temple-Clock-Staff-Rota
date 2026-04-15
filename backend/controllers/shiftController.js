@@ -11,7 +11,7 @@ const createShift = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { staffId, date, startTime, endTime, location, notes } = req.body;
+    const { staffId, date, startTime, endTime, location, notes, visits } = req.body;
 
     const shift = await Shift.create({
       staffId,
@@ -20,6 +20,7 @@ const createShift = async (req, res) => {
       endTime,
       location,
       notes,
+      visits: Array.isArray(visits) ? visits : undefined,
       createdBy: req.user._id,
     });
 
@@ -68,6 +69,7 @@ const getShifts = async (req, res) => {
 
     const shifts = await Shift.find(query)
       .populate('staffId', 'name email role')
+      .populate('visits.client', 'name address coordinates')
       .sort({ date: 1, startTime: 1 });
 
     res.json(shifts);
@@ -82,10 +84,9 @@ const getShifts = async (req, res) => {
 // @access  Private
 const getShiftById = async (req, res) => {
   try {
-    const shift = await Shift.findById(req.params.id).populate(
-      'staffId',
-      'name email'
-    );
+    const shift = await Shift.findById(req.params.id)
+      .populate('staffId', 'name email')
+      .populate('visits.client', 'name address coordinates');
 
     if (!shift) {
       return res.status(404).json({ message: 'Shift not found' });
@@ -111,7 +112,7 @@ const getShiftById = async (req, res) => {
 // @access  Private/Admin
 const updateShift = async (req, res) => {
   try {
-    const { staffId, date, startTime, endTime, location, coordinates, notes, status } = req.body;
+    const { staffId, date, startTime, endTime, location, coordinates, notes, status, visits } = req.body;
 
     const shift = await Shift.findById(req.params.id);
 
@@ -127,6 +128,7 @@ const updateShift = async (req, res) => {
     if (coordinates !== undefined) shift.coordinates = coordinates;
     if (notes !== undefined) shift.notes = notes;
     if (status) shift.status = status;
+    if (visits !== undefined) shift.visits = visits;
 
     const updatedShift = await shift.save();
     await updatedShift.populate('staffId', 'name email');

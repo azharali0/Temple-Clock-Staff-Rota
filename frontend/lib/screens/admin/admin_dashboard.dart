@@ -37,6 +37,7 @@ import 'reports_page.dart';
 import 'settings_page.dart';
 import 'alerts_page.dart';
 import 'qr_management_page.dart';
+import 'client_management_page.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ADMIN DASHBOARD
@@ -62,7 +63,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     _NavItem(icon: FontAwesomeIcons.moneyBillWave, label: 'Payroll'),
     _NavItem(icon: FontAwesomeIcons.chartBar, label: 'Reports'),
     _NavItem(icon: FontAwesomeIcons.bell, label: 'Alerts'),
-    _NavItem(icon: FontAwesomeIcons.qrcode, label: 'QR Code'),
+    _NavItem(icon: FontAwesomeIcons.qrcode, label: 'Daily QR'),
+    _NavItem(icon: FontAwesomeIcons.houseMedical, label: 'Clients'),
     _NavItem(icon: FontAwesomeIcons.gear, label: 'Settings'),
   ];
 
@@ -91,6 +93,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       case 8:
         return const QrManagementPage();
       case 9:
+        return const ClientManagementPage();
+      case 10:
         return const SettingsPage();
       default:
         return const SizedBox.shrink();
@@ -98,7 +102,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   void _onNavTap(int index) {
-    if (index == 10) {
+    if (index == 11) {
       _confirmSignOut();
       return;
     }
@@ -127,7 +131,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   // ── Primary bottom-nav indices (shown as tabs) ─────────────────────────────
   static const _primaryMobileIndices = [0, 1, 2, 8]; // Dashboard, Rota, Timesheets, QR Code
   // Everything else is accessible via "More" bottom sheet
-  static const _moreMenuIndices = [3, 4, 5, 6, 7, 9]; // Staff, Leave, Payroll, Reports, Alerts, Settings
+  static const _moreMenuIndices = [3, 4, 5, 6, 7, 9, 10]; // Staff, Leave, Payroll, Reports, Alerts, Clients, Settings
 
   bool get _isMorePage => _moreMenuIndices.contains(_selectedIndex);
 
