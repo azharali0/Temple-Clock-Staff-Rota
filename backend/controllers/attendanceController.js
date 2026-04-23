@@ -3,6 +3,7 @@ const Attendance = require('../models/Attendance');
 const Shift = require('../models/Shift');
 const Settings = require('../models/Settings');
 const DailyQR = require('../models/DailyQR');
+const Client = require('../models/Client');
 
 // Load configurable settings from DB (cached for performance)
 let _cachedSettings = null;
@@ -64,19 +65,8 @@ const clockIn = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { shiftId, location, imageUrl, qrToken } = req.body;
+    const { shiftId, clientId, location, imageUrl, qrToken } = req.body;
     const staffId = req.user._id;
-
-    // 0. Verify QR token (staff must scan the daily QR)
-    if (req.user.role !== 'admin') {
-      if (!qrToken) {
-        return res.status(400).json({ message: 'QR code scan is required to clock in' });
-      }
-      const validQR = await DailyQR.findOne({ token: qrToken, isActive: true });
-      if (!validQR) {
-        return res.status(403).json({ message: 'Invalid or expired QR code. Please ask your admin for the latest QR.' });
-      }
-    }
 
     // 1. Shift must exist
     const shift = await Shift.findById(shiftId);
@@ -85,74 +75,88 @@ const clockIn = async (req, res) => {
     }
 
     // 2. Shift must belong to this staff member (admins can bypass)
-    if (
-      req.user.role !== 'admin' &&
-      shift.staffId.toString() !== staffId.toString()
-    ) {
-      return res
-        .status(403)
-        .json({ message: 'This shift is not assigned to you' });
+    if (req.user.role !== 'admin' && shift.staffId.toString() !== staffId.toString()) {
+      return res.status(403).json({ message: 'This shift is not assigned to you' });
     }
 
-    // 3. Prevent duplicate clock-in
-    const existing = await Attendance.findOne({ staffId, shiftId });
+    let targetCoords = shift.coordinates;
+    let expectedStartTime = shift.startTime;
+
+    // 3. Domiciliary Checks (If clientId provided)
+    if (clientId) {
+      const client = await Client.findById(clientId);
+      if (!client) return res.status(404).json({ message: 'Client property not found' });
+      targetCoords = client.coordinates;
+
+      const visit = shift.visits?.find((v) => v.client.toString() === clientId.toString());
+      if (visit && visit.expectedStartTime) {
+        expectedStartTime = visit.expectedStartTime;
+      }
+
+      // Permanent Client QR check
+      if (req.user.role !== 'admin') {
+        if (!qrToken) return res.status(400).json({ message: 'You must scan the property QR code to clock in' });
+        if (client.qrToken !== qrToken) {
+          return res.status(403).json({ message: 'Invalid QR code. This code does not match this property.' });
+        }
+      }
+    } else {
+      // Legacy Office Check
+      if (req.user.role !== 'admin') {
+        if (!qrToken) return res.status(400).json({ message: 'QR code scan is required to clock in' });
+        const validQR = await DailyQR.findOne({ token: qrToken, isActive: true });
+        if (!validQR) return res.status(403).json({ message: 'Invalid or expired daily QR code.' });
+      }
+    }
+
+    // 4. Prevent duplicate clock in for the EXACT visit
+    const query = { staffId, shiftId };
+    if (clientId) query.clientId = clientId;
+    else query.clientId = { $exists: false }; // Enforce strict generic shift match
+
+    const existing = await Attendance.findOne(query);
     if (existing) {
-      return res
-        .status(409)
-        .json({ message: 'Already clocked in for this shift' });
+      return res.status(409).json({ message: 'Already clocked in for this location.' });
     }
 
-    // 4. Load settings for geofence + grace period
+    // 5. Load settings for geofence + grace period
     const settings = await getSettings();
     const ALLOWED_RADIUS = settings.geofenceRadius || 200;
     const GRACE_PERIOD = settings.gracePeriodMinutes || 10;
 
-    // 5. Geofence — check within allowed radius if shift has coordinates
-    if (
-      settings.geofenceEnabled &&
-      shift.coordinates &&
-      shift.coordinates.lat != null &&
-      shift.coordinates.lng != null
-    ) {
+    // 6. Geofence Check
+    if (settings.geofenceEnabled && targetCoords && targetCoords.lat != null && targetCoords.lng != null) {
       if (!location || location.lat == null || location.lng == null) {
-        return res
-          .status(400)
-          .json({ message: 'Location is required for this shift' });
+        return res.status(400).json({ message: 'Location is required. Please enable GPS.' });
       }
 
-      const distance = haversineDistance(
-        location.lat,
-        location.lng,
-        shift.coordinates.lat,
-        shift.coordinates.lng
-      );
-
+      const distance = haversineDistance(location.lat, location.lng, targetCoords.lat, targetCoords.lng);
       if (distance > ALLOWED_RADIUS) {
         return res.status(403).json({
-          message: `You are ${Math.round(distance)}m away. Must be within ${ALLOWED_RADIUS}m of the shift location.`,
+          message: `You are ${Math.round(distance)}m away. Must be within ${ALLOWED_RADIUS}m of the location.`,
         });
       }
     }
 
-    // 6. Calculate late minutes (only count time beyond grace period)
+    // 7. Calculate late minutes with "Snap-to-Rota" logic
     const now = new Date();
-    const scheduledStart = buildShiftDateTime(shift.date, shift.startTime);
-    const diffMinutes = Math.floor(
-      (now.getTime() - scheduledStart.getTime()) / 60000
-    );
+    const scheduledStart = buildShiftDateTime(shift.date, expectedStartTime);
+    const diffMinutes = Math.floor((now.getTime() - scheduledStart.getTime()) / 60000);
 
     let lateMinutes = 0;
     let status = 'on-time';
 
+    // "Snap to Rota": If lateness is within grace period, we don't count it as late
     if (diffMinutes > GRACE_PERIOD) {
-      lateMinutes = diffMinutes - GRACE_PERIOD;
+      lateMinutes = diffMinutes; // Record actual late minutes for "major difference" tracking
       status = 'late';
     }
 
-    // 6. Create record
+    // 8. Create record
     const attendance = await Attendance.create({
       staffId,
       shiftId,
+      clientId: clientId || undefined,
       clockInTime: now,
       lateMinutes,
       status,
@@ -162,14 +166,12 @@ const clockIn = async (req, res) => {
 
     await attendance.populate('staffId', 'name email');
     await attendance.populate('shiftId', 'date startTime endTime location');
+    if (clientId) await attendance.populate('clientId', 'name address');
 
     res.status(201).json(attendance);
   } catch (error) {
-    // Mongoose duplicate-key error (race condition safety net)
     if (error.code === 11000) {
-      return res
-        .status(409)
-        .json({ message: 'Already clocked in for this shift' });
+      return res.status(409).json({ message: 'Already clocked in for this location.' });
     }
     console.error('ClockIn error:', error.message);
     res.status(500).json({ message: 'Server error' });
@@ -188,64 +190,72 @@ const clockOut = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { shiftId, imageUrl, qrToken } = req.body;
+    const { shiftId, clientId, imageUrl, qrToken } = req.body;
     const staffId = req.user._id;
 
-    // 0. Verify QR token (staff must scan the daily QR to clock out)
-    if (req.user.role !== 'admin') {
-      if (!qrToken) {
-        return res.status(400).json({ message: 'QR code scan is required to clock out' });
-      }
-      const validQR = await DailyQR.findOne({ token: qrToken, isActive: true });
-      if (!validQR) {
-        return res.status(403).json({ message: 'Invalid or expired QR code. Please ask your admin for the latest QR.' });
-      }
-    }
-
-    // 1. Find the attendance record
-    const attendance = await Attendance.findOne({ staffId, shiftId });
-    if (!attendance) {
-      return res
-        .status(404)
-        .json({ message: 'No clock-in record found for this shift' });
-    }
-
-    // 2. Must not already be clocked out
-    if (attendance.clockOutTime) {
-      return res
-        .status(409)
-        .json({ message: 'Already clocked out for this shift' });
-    }
-
-    // 3. Get shift for end-time calculation
     const shift = await Shift.findById(shiftId);
-    if (!shift) {
-      return res.status(404).json({ message: 'Shift not found' });
+    if (!shift) return res.status(404).json({ message: 'Shift not found' });
+
+    let expectedEndTime = shift.endTime;
+
+    if (clientId) {
+      const client = await Client.findById(clientId);
+      if (!client) return res.status(404).json({ message: 'Client property not found' });
+
+      const visit = shift.visits?.find((v) => v.client.toString() === clientId.toString());
+      if (visit && visit.expectedEndTime) {
+        expectedEndTime = visit.expectedEndTime;
+      }
+
+      if (req.user.role !== 'admin') {
+        if (!qrToken) return res.status(400).json({ message: 'QR scan required to clock out' });
+        if (client.qrToken !== qrToken) {
+          return res.status(403).json({ message: 'Invalid QR code. Does not match client property.' });
+        }
+      }
+    } else {
+      if (req.user.role !== 'admin') {
+        if (!qrToken) return res.status(400).json({ message: 'QR scan required to clock out' });
+        const validQR = await DailyQR.findOne({ token: qrToken, isActive: true });
+        if (!validQR) return res.status(403).json({ message: 'Invalid or expired daily QR code.' });
+      }
     }
 
-    // 4. Load settings for grace period
+    // Find the SPECIFIC active attendance
+    const query = { staffId, shiftId };
+    if (clientId) query.clientId = clientId;
+    else query.clientId = { $exists: false };
+
+    const attendance = await Attendance.findOne(query);
+    if (!attendance) {
+      return res.status(404).json({ message: 'No clock-in record found for this location' });
+    }
+
+    if (attendance.clockOutTime) {
+      return res.status(409).json({ message: 'Already clocked out' });
+    }
+
     const settings = await getSettings();
     const GRACE_PERIOD = settings.gracePeriodMinutes || 10;
-
-    // 5. Calculate extra hours
     const now = new Date();
-    const scheduledEnd = buildShiftDateTime(shift.date, shift.endTime);
-    const outDiffMinutes = Math.floor(
-      (now.getTime() - scheduledEnd.getTime()) / 60000
-    );
+    const scheduledEnd = buildShiftDateTime(shift.date, expectedEndTime);
+    const outDiffMinutes = Math.floor((now.getTime() - scheduledEnd.getTime()) / 60000);
 
     let extraHours = 0;
+    let finalStatus = attendance.status;
+
+    // "Snap to Rota": 
+    // If clocked out slightly early (within grace period), ignore the difference.
+    // If clocked out LATER than scheduled + grace, calculate extra hours.
     if (outDiffMinutes > GRACE_PERIOD) {
       extraHours = parseFloat((outDiffMinutes / 60).toFixed(2));
-    }
-
-    // 6. Final status — preserve 'late' info when overtime applies
-    let finalStatus = attendance.status;
-    if (extraHours > 0) {
       finalStatus = attendance.status === 'late' ? 'late-overtime' : 'overtime';
-    }
+    } else if (outDiffMinutes < -GRACE_PERIOD) {
+      // Major early departure: could mark as special status if needed
+      // For now, we just don't grant overtime
+    } 
+    // Otherwise it stays 'on-time' or 'late' as originally set at clock-in
 
-    // 6. Update
     attendance.clockOutTime = now;
     attendance.extraHours = extraHours;
     attendance.status = finalStatus;
@@ -254,6 +264,7 @@ const clockOut = async (req, res) => {
     await attendance.save();
     await attendance.populate('staffId', 'name email');
     await attendance.populate('shiftId', 'date startTime endTime location');
+    if (clientId) await attendance.populate('clientId', 'name address');
 
     res.json(attendance);
   } catch (error) {

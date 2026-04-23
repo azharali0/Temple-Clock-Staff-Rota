@@ -13,6 +13,7 @@ class AttendanceRecord {
   final String staffId;
   final String staffName;
   final String shiftId;
+  final String? clientId;
   final DateTime scheduledStart;
   final DateTime scheduledEnd;
   final DateTime? clockInTime;
@@ -29,6 +30,7 @@ class AttendanceRecord {
     required this.staffId,
     required this.staffName,
     required this.shiftId,
+    this.clientId,
     required this.scheduledStart,
     required this.scheduledEnd,
     this.clockInTime,
@@ -55,6 +57,7 @@ class AttendanceRecord {
     String? staffId,
     String? staffName,
     String? shiftId,
+    String? clientId,
     DateTime? scheduledStart,
     DateTime? scheduledEnd,
     DateTime? clockInTime,
@@ -71,6 +74,7 @@ class AttendanceRecord {
       staffId: staffId ?? this.staffId,
       staffName: staffName ?? this.staffName,
       shiftId: shiftId ?? this.shiftId,
+      clientId: clientId ?? this.clientId,
       scheduledStart: scheduledStart ?? this.scheduledStart,
       scheduledEnd: scheduledEnd ?? this.scheduledEnd,
       clockInTime: clockInTime ?? this.clockInTime,

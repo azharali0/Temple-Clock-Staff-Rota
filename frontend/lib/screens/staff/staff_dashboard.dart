@@ -42,17 +42,66 @@ class _StaffDashboardState extends State<StaffDashboard>
   int _selectedIndex = 0;
   int _unreadAlertCount = 0;
 
+  Timer? _alertTimer;
+
   @override
   void initState() {
     super.initState();
+    _startAlertPolling();
+  }
+
+  @override
+  void dispose() {
+    _alertTimer?.cancel();
+    super.dispose();
+  }
+
+  final Set<String> _notifiedAlertIds = {};
+
+  void _startAlertPolling() {
+    // Initial check
     _loadUnreadCount();
+    // Poll every 15 seconds for responsiveness
+    _alertTimer = Timer.periodic(const Duration(seconds: 15), (_) => _loadUnreadCount());
   }
 
   Future<void> _loadUnreadCount() async {
     try {
       final alertService = Provider.of<AlertService>(context, listen: false);
-      final count = await alertService.getMyUnreadCount();
-      if (mounted) setState(() => _unreadAlertCount = count);
+      final alerts = await alertService.getMyAlerts(unreadOnly: true);
+      
+      if (mounted) {
+        setState(() => _unreadAlertCount = alerts.length);
+      }
+
+      for (var alert in alerts) {
+        if (!_notifiedAlertIds.contains(alert.id)) {
+          _notifiedAlertIds.add(alert.id);
+          
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('New Notice', style: TextStyle(fontWeight: FontWeight.bold)),
+                    Text(alert.message, style: const TextStyle(fontSize: 12)),
+                  ],
+                ),
+                backgroundColor: Colors.orange.shade800,
+                behavior: SnackBarBehavior.floating,
+                duration: const Duration(seconds: 5),
+                action: SnackBarAction(
+                  label: "View",
+                  textColor: Colors.white,
+                  onPressed: _showNotifications,
+                ),
+              ),
+            );
+          }
+        }
+      }
     } catch (_) {}
   }
 
@@ -305,7 +354,7 @@ class _StaffHomePageState extends State<_StaffHomePage> {
   Timer? _clockTimer;
 
   RotaShift? _todayShift;
-  AttendanceRecord? _attendanceRecord;
+  List<AttendanceRecord> _attendanceRecords = [];
 
   @override
   void initState() {
@@ -364,21 +413,33 @@ class _StaffHomePageState extends State<_StaffHomePage> {
       
        if (mounted) {
         setState(() {
-          try {
-            _attendanceRecord = records.firstWhere((r) => r.shiftId == _todayShift!.id);
-          } catch (_) {
-            _attendanceRecord = null;
-          }
+          _attendanceRecords = records.where((r) => r.shiftId == _todayShift!.id).toList();
         });
       }
     } catch (_) {}
+  }
+
+  AttendanceRecord? _getRecordForVisit(String? clientId) {
+    if (clientId == null) {
+      // For standard shifts, we look for the record without a clientId
+      try {
+        return _attendanceRecords.firstWhere((r) => r.clientId == null || r.clientId!.isEmpty);
+      } catch (_) {
+        return null;
+      }
+    }
+    try {
+      return _attendanceRecords.firstWhere((r) => r.clientId == clientId);
+    } catch (_) {
+      return null;
+    }
   }
 
   // ─── Navigate to clock screen ────────────────────────────────────────────────
 
   /// Opens the camera QR scanner screen (or manual-entry fallback).
   /// Verifies the token with the backend, then navigates to ClockInScreen.
-  Future<void> _scanAndVerifyQR(bool isClockIn) async {
+  Future<void> _scanAndVerifyQR(bool isClockIn, {String? targetClientId, String? targetClientName}) async {
     if (!isClockIn && _todayShift == null) return;
     if (isClockIn && _todayShift == null) {
       showAppSnackBar(context, 'No shift scheduled today', isError: true);
@@ -394,12 +455,17 @@ class _StaffHomePageState extends State<_StaffHomePage> {
 
     if (enteredToken == null || enteredToken.isEmpty || !mounted) return;
 
-    // Extract the token from the JSON payload if user scanned a QR image
+    // Extract the token and clientId from the JSON payload if user scanned a QR image
     String resolvedToken = enteredToken;
+    String? resolvedClientId;
+    
     if (enteredToken.contains('token')) {
       try {
-        final match = RegExp(r'"token"\s*:\s*"([^"]+)"').firstMatch(enteredToken);
-        if (match != null) resolvedToken = match.group(1)!;
+        final tokenMatch = RegExp(r'"token"\s*:\s*"([^"]+)"').firstMatch(enteredToken);
+        if (tokenMatch != null) resolvedToken = tokenMatch.group(1)!;
+        
+        final clientMatch = RegExp(r'"clientId"\s*:\s*"([^"]+)"').firstMatch(enteredToken);
+        if (clientMatch != null) resolvedClientId = clientMatch.group(1);
       } catch (_) {}
     }
 
@@ -429,12 +495,22 @@ class _StaffHomePageState extends State<_StaffHomePage> {
           staffId: widget.user.id,
           staffName: widget.user.name,
           qrToken: resolvedToken,
+          clientId: targetClientId ?? resolvedClientId,
+          clientName: targetClientName,
         ),
       ),
     );
 
     if (result != null && mounted) {
-      setState(() => _attendanceRecord = result);
+      // Find and update or add the record in our local list
+      setState(() {
+        final idx = _attendanceRecords.indexWhere((r) => r.id == result.id);
+        if (idx != -1) {
+          _attendanceRecords[idx] = result;
+        } else {
+          _attendanceRecords.add(result);
+        }
+      });
       showAppSnackBar(
         context,
         isClockIn ? 'Clocked in successfully!' : 'Clocked out successfully!',
@@ -442,9 +518,9 @@ class _StaffHomePageState extends State<_StaffHomePage> {
     }
   }
 
-  Future<void> _openClockScreen(bool isClockIn) async {
+  Future<void> _openClockScreen(bool isClockIn, {String? clientId, String? clientName}) async {
     // All clock-in / clock-out goes through QR verification
-    await _scanAndVerifyQR(isClockIn);
+    await _scanAndVerifyQR(isClockIn, targetClientId: clientId, targetClientName: clientName);
   }
 
   @override
@@ -709,9 +785,17 @@ class _StaffHomePageState extends State<_StaffHomePage> {
     }
 
     final shift = _todayShift!;
-    final record = _attendanceRecord;
     final sf = DateFormat("HH:mm");
 
+    // Check if this is a domiciliary shift with visits
+    final hasVisits = shift.visits != null && shift.visits!.isNotEmpty;
+
+    if (hasVisits) {
+      return _buildItineraryCard(shift, sf);
+    }
+
+    // Standard shift logic
+    final record = _getRecordForVisit(null);
     final bool canClockIn = record == null;
     final bool canClockOut = record != null && record.isClockedIn;
     final bool alreadyOut = record != null && record.isClockedOut;
@@ -721,7 +805,6 @@ class _StaffHomePageState extends State<_StaffHomePage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Title row
           Row(
             children: [
               Container(
@@ -738,9 +821,9 @@ class _StaffHomePageState extends State<_StaffHomePage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
+                    const Text(
                       "Today's Shift",
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontFamily: "Outfit",
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
@@ -748,7 +831,7 @@ class _StaffHomePageState extends State<_StaffHomePage> {
                       ),
                     ),
                     Text(
-                      shift.role + "  •  " + sf.format(shift.startTime) + " – " + sf.format(shift.endTime),
+                      "${shift.role}  •  ${sf.format(shift.startTime)} – ${sf.format(shift.endTime)}",
                       style: const TextStyle(
                         fontFamily: "Outfit",
                         fontSize: 12,
@@ -761,10 +844,8 @@ class _StaffHomePageState extends State<_StaffHomePage> {
             ],
           ),
           const SizedBox(height: 14),
-          // Status summary
           if (record != null) _buildAttendanceSummary(record, sf),
           const SizedBox(height: 14),
-          // Buttons
           if (alreadyOut)
             _statusBanner("Shift complete — clocked out", _teal)
           else
@@ -792,6 +873,240 @@ class _StaffHomePageState extends State<_StaffHomePage> {
               ],
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildItineraryCard(RotaShift shift, DateFormat sf) {
+    return Column(
+      children: [
+        _card(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Icon(Icons.map_outlined, color: _navy.withValues(alpha: 0.7), size: 20),
+              const SizedBox(width: 10),
+              const Text(
+                "Today's Itinerary (Domiciliary)",
+                style: TextStyle(
+                  fontFamily: "Outfit",
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: _navy,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        ...shift.visits!.map((visit) {
+          final record = _getRecordForVisit(visit.clientId);
+          final bool canClockIn = record == null;
+          final bool canClockOut = record != null && record.isClockedIn;
+          final bool isCompleted = record != null && record.isClockedOut;
+
+          return Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            child: _card(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: (isCompleted ? Colors.green : _teal).withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          isCompleted ? Icons.check_circle_outline : Icons.house_outlined,
+                          color: isCompleted ? Colors.green : _teal,
+                          size: 18,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              visit.clientName,
+                              style: const TextStyle(
+                                fontFamily: "Outfit",
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: _navy,
+                              ),
+                            ),
+                            Text(
+                              "${sf.format(visit.expectedStartTime)} – ${sf.format(visit.expectedEndTime)}",
+                              style: TextStyle(
+                                fontFamily: "Outfit",
+                                fontSize: 13,
+                                color: Colors.grey.shade600,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8, left: 42),
+                    child: Text(
+                      visit.clientAddress,
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  if (record != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: _buildAttendanceSummary(record, sf),
+                    ),
+                  if (isCompleted)
+                    _statusBanner("Visit Completed", Colors.green)
+                  else
+                    Row(
+                      children: [
+                        if (canClockIn) ...[
+                          Expanded(
+                            child: _ClockButton(
+                              label: "Clock In",
+                              icon: Icons.login,
+                              color: _teal,
+                              onPressed: () => _openClockScreen(true, clientId: visit.clientId, clientName: visit.clientName),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          // "Report Delay" Button
+                          _miniActionButton(
+                            icon: Icons.notification_important_outlined,
+                            color: Colors.orange.shade700,
+                            onPressed: () => _showReportDelayDialog(visit),
+                            tooltip: "Report Delay to Office",
+                          ),
+                        ],
+                        if (canClockOut)
+                          Expanded(
+                            child: _ClockButton(
+                              label: "Clock Out",
+                              icon: Icons.logout,
+                              color: Colors.redAccent,
+                              onPressed: () => _openClockScreen(false, clientId: visit.clientId, clientName: visit.clientName),
+                            ),
+                          ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  Widget _miniActionButton({
+    required IconData icon,
+    required Color color,
+    required VoidCallback onPressed,
+    String? tooltip,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: IconButton(
+        icon: Icon(icon, color: color, size: 18),
+        onPressed: onPressed,
+        tooltip: tooltip,
+        constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+        padding: EdgeInsets.zero,
+      ),
+    );
+  }
+
+  Future<void> _showReportDelayDialog(ShiftVisit visit) async {
+    int delayMinutes = 15;
+    final reasonController = TextEditingController();
+    bool submitting = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Text(
+            "Report Delay: ${visit.clientName}",
+            style: const TextStyle(fontFamily: "Outfit", fontSize: 18, fontWeight: FontWeight.w700),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text("How long will you be delayed?", style: TextStyle(fontSize: 14)),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<int>(
+                value: delayMinutes,
+                decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
+                items: [15, 30, 45, 60]
+                    .map((m) => DropdownMenuItem(value: m, child: Text("$m Minutes")))
+                    .toList(),
+                onChanged: (val) => setState(() => delayMinutes = val!),
+              ),
+              const SizedBox(height: 16),
+              const Text("Reason (optional):", style: TextStyle(fontSize: 14)),
+              const SizedBox(height: 8),
+              TextField(
+                controller: reasonController,
+                maxLines: 2,
+                decoration: const InputDecoration(border: OutlineInputBorder(), hintText: "Traffic, previous visit ran over..."),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: submitting ? null : () => Navigator.pop(context),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: submitting
+                  ? null
+                  : () async {
+                      setState(() => submitting = true);
+                      try {
+                        final alertService = Provider.of<AlertService>(context, listen: false);
+                        await alertService.reportDelay(
+                          shiftId: _todayShift!.id,
+                          clientId: visit.clientId,
+                          estimatedDelayMinutes: delayMinutes,
+                          message: reasonController.text.trim().isEmpty ? "Staff running late" : reasonController.text.trim(),
+                        );
+                        if (context.mounted) {
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text("Delay reported to Head Office")),
+                          );
+                        }
+                      } catch (e) {
+                         if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(e.toString()), backgroundColor: Colors.red),
+                          );
+                         }
+                      } finally {
+                        if (context.mounted) setState(() => submitting = false);
+                      }
+                    },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.orange.shade700, foregroundColor: Colors.white),
+              child: Text(submitting ? "Reporting..." : "Report Delay"),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -980,10 +1295,10 @@ class _StaffHomePageState extends State<_StaffHomePage> {
     );
   }
 
-  Widget _card({required Widget child}) {
+  Widget _card({required Widget child, EdgeInsetsGeometry? padding}) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(14),
+      padding: padding ?? const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),

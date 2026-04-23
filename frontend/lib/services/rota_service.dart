@@ -52,6 +52,7 @@ class RotaService {
     required String endTime,
     String? location,
     String? notes,
+    List<Map<String, dynamic>>? visits,
   }) async {
     final response = await _apiService.post('/shifts', {
       'staffId': staffId,
@@ -60,6 +61,7 @@ class RotaService {
       'endTime': endTime,
       if (location != null) 'location': location,
       if (notes != null) 'notes': notes,
+      if (visits != null && visits.isNotEmpty) 'visits': visits,
     });
     if (response.statusCode != 201) {
       final data = jsonDecode(response.body);
@@ -122,6 +124,32 @@ class RotaService {
       endParts.length > 1 ? (int.tryParse(endParts[1]) ?? 0) : 0,
     );
 
+    List<ShiftVisit>? parsedVisits;
+    if (json['visits'] != null && json['visits'] is List) {
+      parsedVisits = (json['visits'] as List).map((v) {
+        final clientObj = v['client'] ?? {};
+        final vStartParts = (v['expectedStartTime']?.toString() ?? '09:00').split(':');
+        final vEndParts = (v['expectedEndTime']?.toString() ?? '17:00').split(':');
+        
+        return ShiftVisit(
+          clientId: clientObj['_id'] ?? '',
+          clientName: clientObj['name'] ?? 'Unknown Client',
+          clientAddress: clientObj['address'] ?? 'No Address',
+          expectedStartTime: DateTime(
+            shiftDate.year, shiftDate.month, shiftDate.day,
+            int.tryParse(vStartParts[0]) ?? 9,
+            vStartParts.length > 1 ? (int.tryParse(vStartParts[1]) ?? 0) : 0,
+          ),
+          expectedEndTime: DateTime(
+            shiftDate.year, shiftDate.month, shiftDate.day,
+            int.tryParse(vEndParts[0]) ?? 17,
+            vEndParts.length > 1 ? (int.tryParse(vEndParts[1]) ?? 0) : 0,
+          ),
+        );
+      }).toList();
+      parsedVisits.sort((a, b) => a.expectedStartTime.compareTo(b.expectedStartTime));
+    }
+
     return RotaShift(
       id: json['_id'] ?? json['id'] ?? '',
       staffId: staffId,
@@ -132,6 +160,7 @@ class RotaService {
       startTime: start,
       endTime: end,
       status: json['status'] ?? 'scheduled',
+      visits: parsedVisits,
     );
   }
 }

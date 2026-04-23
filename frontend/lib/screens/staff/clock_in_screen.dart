@@ -16,6 +16,7 @@ import "../../models/rota_model.dart";
 import "../../models/attendance_model.dart";
 import "../../services/attendance_service.dart";
 import "../../widgets/shared_widgets.dart";
+import "../../helpers/face_detector_helper.dart";
 
 class ClockInScreen extends StatefulWidget {
   final RotaShift shift;
@@ -23,6 +24,8 @@ class ClockInScreen extends StatefulWidget {
   final String staffId;
   final String staffName;
   final String? qrToken;
+  final String? clientId;
+  final String? clientName;
 
   const ClockInScreen({
     super.key,
@@ -31,6 +34,8 @@ class ClockInScreen extends StatefulWidget {
     required this.staffId,
     required this.staffName,
     this.qrToken,
+    this.clientId,
+    this.clientName,
   });
 
   @override
@@ -233,6 +238,21 @@ class _ClockInScreenState extends State<ClockInScreen> {
 
     setState(() => _isLoading = true);
 
+    if (_capturedPhoto != null && !_photoSkipped) {
+      final hasFace = await FaceDetectorHelper.containsFace(_capturedPhoto!.path);
+      if (!hasFace) {
+        if (mounted) {
+          setState(() => _isLoading = false);
+          showAppSnackBar(
+            context,
+            "No human face detected! Please take a clear photo of yourself.",
+            isError: true,
+          );
+        }
+        return;
+      }
+    }
+
     try {
       final attendanceService = Provider.of<AttendanceService>(context, listen: false);
       AttendanceRecord record;
@@ -243,6 +263,7 @@ class _ClockInScreenState extends State<ClockInScreen> {
       if (widget.isClockIn) {
         record = await attendanceService.clockIn(
           shiftId: widget.shift.id,
+          clientId: widget.clientId,
           latitude: lat,
           longitude: lng,
           photoPath: _capturedPhoto?.path,
@@ -251,6 +272,7 @@ class _ClockInScreenState extends State<ClockInScreen> {
       } else {
         record = await attendanceService.clockOut(
           shiftId: widget.shift.id,
+          clientId: widget.clientId,
           latitude: lat,
           longitude: lng,
           photoPath: _capturedPhoto?.path,
@@ -387,20 +409,34 @@ class _ClockInScreenState extends State<ClockInScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      widget.shift.role,
-                      style: const TextStyle(
-                        fontFamily: "Outfit",
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: _navy,
+                    if (widget.clientName != null) ...[
+                      Text(
+                        "Client: ${widget.clientName}",
+                        style: const TextStyle(
+                          fontFamily: "Outfit",
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: _teal,
+                        ),
                       ),
-                    ),
+                      const SizedBox(height: 2),
+                    ] else
+                      Text(
+                        widget.shift.role,
+                        style: const TextStyle(
+                          fontFamily: "Outfit",
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: _navy,
+                        ),
+                      ),
                     Text(
-                      (widget.shift.departmentName == null ||
-                              widget.shift.departmentName!.isEmpty)
-                          ? 'General'
-                          : widget.shift.departmentName!,
+                      (widget.clientName != null)
+                          ? widget.shift.role
+                          : (widget.shift.departmentName == null ||
+                                  widget.shift.departmentName!.isEmpty)
+                              ? 'General'
+                              : widget.shift.departmentName!,
                       style: const TextStyle(
                         fontFamily: "Outfit",
                         fontSize: 11,

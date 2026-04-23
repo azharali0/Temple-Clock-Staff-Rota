@@ -1,6 +1,11 @@
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../core/constants.dart';
 import '../../core/responsive.dart';
@@ -136,6 +141,85 @@ class _QrManagementPageState extends State<QrManagementPage> {
       if (mounted) {
         showAppSnackBar(context, 'Error: $e', isError: true);
       }
+    }
+  }
+
+  Future<Uint8List> _generatePdfBytes(DailyQR qr, String qrPayload) async {
+    final qrValidationResult = QrValidator.validate(
+      data: qrPayload,
+      version: QrVersions.auto,
+      errorCorrectionLevel: QrErrorCorrectLevel.L,
+    );
+    final qrCode = qrValidationResult.qrCode;
+    final painter = QrPainter.withQr(
+      qr: qrCode!,
+      color: const Color(0xFF0F2C59),
+      emptyColor: const Color(0xFFFFFFFF),
+      gapless: true,
+    );
+    final picData = await painter.toImageData(2048, format: ui.ImageByteFormat.png);
+    if (picData == null) throw Exception('Failed to render QR Code');
+    final qrImageBytes = picData.buffer.asUint8List();
+
+    final doc = pw.Document();
+    final imageProvider = pw.MemoryImage(qrImageBytes);
+    final df = DateFormat('EEEE, d MMMM yyyy');
+
+    doc.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        build: (pw.Context context) {
+          return pw.Center(
+            child: pw.Column(
+              mainAxisAlignment: pw.MainAxisAlignment.center,
+              children: [
+                pw.Text('Temple Clock', style: pw.TextStyle(fontSize: 40, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900)),
+                pw.SizedBox(height: 10),
+                pw.Text('Staff Clock-In / Clock-Out', style: pw.TextStyle(fontSize: 24, color: PdfColors.grey700)),
+                pw.SizedBox(height: 40),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(20),
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(color: PdfColors.blue900, width: 2),
+                    borderRadius: const pw.BorderRadius.all(pw.Radius.circular(16)),
+                  ),
+                  child: pw.Image(imageProvider, width: 350, height: 350),
+                ),
+                pw.SizedBox(height: 30),
+                pw.Text(qr.label, style: pw.TextStyle(fontSize: 28, fontWeight: pw.FontWeight.bold)),
+                pw.SizedBox(height: 10),
+                pw.Text('Generated: ${df.format(qr.createdAt.toLocal())}', style: const pw.TextStyle(fontSize: 16)),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+
+    return doc.save();
+  }
+
+  Future<void> _printQR(DailyQR qr, String qrPayload) async {
+    try {
+      final pdfBytes = await _generatePdfBytes(qr, qrPayload);
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => pdfBytes,
+        name: 'TempleClock_QR_${qr.label}.pdf',
+      );
+    } catch (e) {
+      if (mounted) showAppSnackBar(context, 'Failed to print: $e', isError: true);
+    }
+  }
+
+  Future<void> _downloadQR(DailyQR qr, String qrPayload) async {
+    try {
+      final pdfBytes = await _generatePdfBytes(qr, qrPayload);
+      await Printing.sharePdf(
+        bytes: pdfBytes,
+        filename: 'TempleClock_QR_${qr.label}.pdf',
+      );
+    } catch (e) {
+      if (mounted) showAppSnackBar(context, 'Failed to download: $e', isError: true);
     }
   }
 
@@ -427,6 +511,27 @@ class _QrManagementPageState extends State<QrManagementPage> {
           spacing: 10,
           runSpacing: 10,
           children: [
+            FilledButton.icon(
+              onPressed: () => _printQR(qr, '{"type":"careshift-daily","token":"${qr.token}"}'),
+              icon: const Icon(Icons.print, size: 16),
+              label: const Text('Print QR'),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.teal,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed: () => _downloadQR(qr, '{"type":"careshift-daily","token":"${qr.token}"}'),
+              icon: const Icon(Icons.download, size: 16),
+              label: const Text('Download'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.navy,
+                side: const BorderSide(color: AppColors.border),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
             OutlinedButton.icon(
               onPressed: _generateNewQR,
               icon: const Icon(Icons.refresh, size: 16),

@@ -1,13 +1,17 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants.dart';
 import '../../core/responsive.dart';
 import '../../models/rota_model.dart';
 import '../../models/user_model.dart';
 import '../../services/rota_service.dart';
 import '../../services/user_service.dart';
+import '../../services/export_service.dart';
 import '../../widgets/shared_widgets.dart';
 
 class AdminRotaPage extends StatefulWidget {
@@ -90,6 +94,24 @@ class _AdminRotaPageState extends State<AdminRotaPage> {
       showAppSnackBar(context, 'No staff available', isError: true);
       return;
     }
+
+    // Fetch available clients for domiciliary visits picker
+    List<Map<String, dynamic>> availableClients = [];
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString(AppConstants.tokenKey);
+      if (token != null) {
+        final res = await http.get(
+          Uri.parse("${AppConstants.apiBaseUrl}/clients"),
+          headers: {"Authorization": "Bearer $token"},
+        );
+        if (res.statusCode == 200) {
+          final decoded = json.decode(res.body);
+          if (decoded is List) availableClients = decoded.cast<Map<String, dynamic>>();
+        }
+      }
+    } catch (_) {}
+
     String? selectedStaffId = _staffList.first.id;
     final today = DateTime.now();
     DateTime selectedDate = presetDate != null && presetDate.isAfter(today.subtract(const Duration(days: 1)))
@@ -99,6 +121,7 @@ class _AdminRotaPageState extends State<AdminRotaPage> {
     TimeOfDay endTime = const TimeOfDay(hour: 17, minute: 0);
     final locationCtrl = TextEditingController();
     final notesCtrl = TextEditingController();
+    List<Map<String, dynamic>> visitEntries = [];
 
     final result = await showDialog<bool>(
       context: context,
@@ -238,6 +261,162 @@ class _AdminRotaPageState extends State<AdminRotaPage> {
                     ),
                     maxLines: 2,
                   ),
+
+                  // ── Client Visits (Domiciliary) ──────────────────────
+                  if (availableClients.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.teal.withValues(alpha: 0.06),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.teal.withValues(alpha: 0.2)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.home_work_rounded, size: 16, color: AppColors.teal),
+                              const SizedBox(width: 6),
+                              const Expanded(
+                                child: Text('Client Visits (Domiciliary)',
+                                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.navy)),
+                              ),
+                              InkWell(
+                                onTap: () {
+                                  final usedIds = visitEntries.map((v) => v['clientId']).toSet();
+                                  final remaining = availableClients.where((c) => !usedIds.contains(c['_id'])).toList();
+                                  if (remaining.isEmpty) {
+                                    ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('All clients added')));
+                                    return;
+                                  }
+                                  setDialogState(() {
+                                    visitEntries.add({
+                                      'clientId': remaining.first['_id'],
+                                      'clientName': remaining.first['name'],
+                                      'startTime': const TimeOfDay(hour: 9, minute: 0),
+                                      'endTime': const TimeOfDay(hour: 10, minute: 0),
+                                    });
+                                  });
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.teal,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.add, size: 14, color: Colors.white),
+                                      SizedBox(width: 4),
+                                      Text('Add Visit', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white)),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (visitEntries.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 8),
+                              child: Text('No visits. Tap Add Visit for domiciliary shifts.',
+                                  style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                            ),
+                          ...visitEntries.asMap().entries.map((entry) {
+                            final idx = entry.key;
+                            final visit = entry.value;
+                            final usedIds = visitEntries.where((v) => v != visit).map((v) => v['clientId']).toSet();
+                            final clientOpts = availableClients.where((c) => !usedIds.contains(c['_id']) || c['_id'] == visit['clientId']).toList();
+                            return Container(
+                              margin: const EdgeInsets.only(top: 8),
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: AppColors.border),
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: DropdownButtonFormField<String>(
+                                          value: visit['clientId'] as String?,
+                                          decoration: InputDecoration(
+                                            labelText: 'Client',
+                                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                                            isDense: true,
+                                          ),
+                                          isExpanded: true,
+                                          items: clientOpts.map((c) => DropdownMenuItem(value: c['_id'].toString(), child: Text(c['name'].toString(), overflow: TextOverflow.ellipsis))).toList(),
+                                          onChanged: (v) {
+                                            if (v != null) {
+                                              final sel = availableClients.firstWhere((c) => c['_id'] == v);
+                                              setDialogState(() {
+                                                visit['clientId'] = v;
+                                                visit['clientName'] = sel['name'];
+                                              });
+                                            }
+                                          },
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      InkWell(
+                                        onTap: () => setDialogState(() => visitEntries.removeAt(idx)),
+                                        child: const Icon(Icons.delete_outline, size: 20, color: AppColors.error),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: InkWell(
+                                          onTap: () async {
+                                            final t = await showTimePicker(context: ctx, initialTime: visit['startTime'] as TimeOfDay);
+                                            if (t != null) setDialogState(() => visit['startTime'] = t);
+                                          },
+                                          child: InputDecorator(
+                                            decoration: InputDecoration(
+                                              labelText: 'Arrive', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10), isDense: true,
+                                            ),
+                                            child: Text((visit['startTime'] as TimeOfDay).format(ctx), style: const TextStyle(fontSize: 13)),
+                                          ),
+                                        ),
+                                      ),
+                                      const Padding(padding: EdgeInsets.symmetric(horizontal: 6), child: Icon(Icons.arrow_forward, size: 14, color: AppColors.textMuted)),
+                                      Expanded(
+                                        child: InkWell(
+                                          onTap: () async {
+                                            final t = await showTimePicker(context: ctx, initialTime: visit['endTime'] as TimeOfDay);
+                                            if (t != null) setDialogState(() => visit['endTime'] = t);
+                                          },
+                                          child: InputDecorator(
+                                            decoration: InputDecoration(
+                                              labelText: 'Depart', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10), isDense: true,
+                                            ),
+                                            child: Text((visit['endTime'] as TimeOfDay).format(ctx), style: const TextStyle(fontSize: 13)),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            );
+                          }),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -273,6 +452,20 @@ class _AdminRotaPageState extends State<AdminRotaPage> {
             '${startTime.hour.toString().padLeft(2, '0')}:${startTime.minute.toString().padLeft(2, '0')}';
         final endStr =
             '${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}';
+        // Build visits payload
+        List<Map<String, dynamic>>? visitsPayload;
+        if (visitEntries.isNotEmpty) {
+          visitsPayload = visitEntries.map((v) {
+            final vs = v['startTime'] as TimeOfDay;
+            final ve = v['endTime'] as TimeOfDay;
+            return {
+              'client': v['clientId'],
+              'expectedStartTime': '${vs.hour.toString().padLeft(2, '0')}:${vs.minute.toString().padLeft(2, '0')}',
+              'expectedEndTime': '${ve.hour.toString().padLeft(2, '0')}:${ve.minute.toString().padLeft(2, '0')}',
+            };
+          }).toList();
+        }
+
         await rotaSvc.createShift(
           staffId: selectedStaffId!,
           date: dateStr,
@@ -281,6 +474,7 @@ class _AdminRotaPageState extends State<AdminRotaPage> {
           location:
               locationCtrl.text.isNotEmpty ? locationCtrl.text : null,
           notes: notesCtrl.text.isNotEmpty ? notesCtrl.text : null,
+          visits: visitsPayload,
         );
         if (mounted) {
           showAppSnackBar(context, 'Shift created');
@@ -362,6 +556,21 @@ class _AdminRotaPageState extends State<AdminRotaPage> {
                     onPrev: _prevWeek,
                     onNext: _nextWeek,
                     onToday: _goToday,
+                  ),
+                  const SizedBox(width: 12),
+                  // Export Button
+                  IconButton(
+                    onPressed: () {
+                      final dateStr = DateFormat('yyyy-MM-dd').format(_weekStart);
+                      ExportService.exportRotaCsv(_shifts, "rota_$dateStr");
+                    },
+                    icon: const Icon(Icons.download, color: AppColors.teal),
+                    tooltip: 'Export Weekly Rota',
+                    style: IconButton.styleFrom(
+                      backgroundColor: AppColors.teal.withValues(alpha: 0.1),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
                   ),
                 ],
               ),

@@ -66,6 +66,7 @@ app.use((req, res, next) => {
 app.use('/api/auth', authLimiter, require('./routes/authRoutes'));
 app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/settings', require('./routes/settingsRoutes'));
+app.use('/api/clients', require('./routes/clientRoutes'));
 app.use('/api/shifts', require('./routes/shiftRoutes'));
 app.use('/api/attendance', require('./routes/attendanceRoutes'));
 app.use('/api/leave', require('./routes/leaveRoutes'));

@@ -18,7 +18,7 @@ const settingsSchema = new mongoose.Schema(
         },
         geofenceRadius: {
             type: Number,
-            default: 200,
+            default: 50,
         },
         annualLeaveHours: {
             type: Number,
