@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:html' as html; // For web download
+import 'package:universal_html/html.dart' as html; // Cross-platform HTML support
 import 'package:intl/intl.dart';
 import '../models/rota_model.dart';
 import '../models/attendance_model.dart';
