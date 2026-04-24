@@ -609,7 +609,7 @@ class _AdminOverviewPageState extends State<_AdminOverviewPage> {
     final late = _todayAttendance['lateCount'] ?? 0;
     final completed = _todayAttendance['completedShifts'] ?? 0;
     final extra =
-        (_todayAttendance['extraHoursTotal'] as double? ?? 0.0);
+        ((_todayAttendance['extraHoursTotal'] as num?)?.toDouble() ?? 0.0);
     final screenW = MediaQuery.of(context).size.width;
     final aspectRatio = Responsive.isDesktop(context)
         ? 1.5
