@@ -70,11 +70,14 @@ jobs:
       - name: Build Windows
         run: flutter build windows --release
 
-      - name: Upload Windows Build
+      - name: Create Windows Installer
+        run: iscc windows\installer.iss
+
+      - name: Upload Windows Setup EXE
         uses: actions/upload-artifact@v4
         with:
-          name: TempleClockWindows-EXE
-          path: frontend/build/windows/x64/runner/Release/
+          name: TempleClock_Windows_Installer
+          path: frontend/build/windows/installer/TempleClock_Setup.exe
 
   # ──────────────────────────────────────────────────────────────────
   # JOB 3: Build iOS App (unsigned - for testing)
