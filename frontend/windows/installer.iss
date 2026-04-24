@@ -1,7 +1,7 @@
 [Setup]
 AppName=Temple Clock
 AppVersion=1.0.0
-Publisher=CareShift
+AppPublisher=CareShift
 DefaultDirName={autopf}\Temple Clock
 DefaultGroupName=Temple Clock
 UninstallDisplayIcon={app}\careshift.exe
