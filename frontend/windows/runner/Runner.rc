@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "careshift" "\0"
+            VALUE "CompanyName", "Temple Clock" "\0"
+            VALUE "FileDescription", "Temple Clock" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "careshift" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Temple Clock. All rights reserved." "\0"
             VALUE "OriginalFilename", "careshift.exe" "\0"
-            VALUE "ProductName", "careshift" "\0"
+            VALUE "ProductName", "Temple Clock" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

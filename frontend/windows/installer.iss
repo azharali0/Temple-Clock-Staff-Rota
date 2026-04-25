@@ -5,6 +5,7 @@ AppPublisher=CareShift
 DefaultDirName={autopf}\Temple Clock
 DefaultGroupName=Temple Clock
 UninstallDisplayIcon={app}\careshift.exe
+SetupIconFile=runner\resources\app_icon.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=..\build\windows\installer
